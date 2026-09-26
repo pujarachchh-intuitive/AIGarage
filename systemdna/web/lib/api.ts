@@ -6,7 +6,7 @@
 import { computeImpact } from "@/lib/impact";
 import marketplaceGraph from "@/lib/mock/marketplace-dashboard.graph.json";
 import { shopflowGraph } from "@/lib/mock/shopflow";
-import type { ChangeRequest, DataMode, Graph, ImpactReport, RunEvent } from "@/lib/types";
+import type { ChangeRequest, ConnectedRepo, DataMode, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
 export const DATA_MODE: DataMode = API_URL ? "live" : "demo";
@@ -53,13 +53,85 @@ export const DEMO_REPOS: DemoRepo[] = [
   },
 ];
 
-export function demoRepo(id: string | undefined): DemoRepo {
-  return DEMO_REPOS.find((r) => r.id === id) ?? DEMO_REPOS[0];
+export function demoRepo(id: string | undefined): DemoRepo | undefined {
+  return DEMO_REPOS.find((r) => r.id === id);
 }
 
+/**
+ * The graph for a repo id: a sample, a repo the user connected (ingestion API
+ * inside this app), or, in live mode with no repo picked, the backend's graph.
+ */
 export async function fetchGraph(repoId?: string): Promise<Graph> {
-  if (DATA_MODE === "demo") return demoRepo(repoId).graph;
-  return http<Graph>("/graph");
+  const sample = demoRepo(repoId);
+  if (sample) return sample.graph;
+  if (repoId) {
+    const res = await fetch(`/api/repos/${encodeURIComponent(repoId)}`, { cache: "no-store" });
+    if (res.ok) return ((await res.json()) as { graph: Graph }).graph;
+  }
+  if (DATA_MODE === "live") return http<Graph>("/graph");
+  return DEMO_REPOS[0].graph;
+}
+
+// ---------------------------------------------------------------------------
+// Connected repositories (ingestion API: app/api/repos).
+// ---------------------------------------------------------------------------
+
+export async function listConnectedRepos(): Promise<ConnectedRepo[]> {
+  const res = await fetch("/api/repos", { cache: "no-store" });
+  if (!res.ok) throw new Error(`Could not list repositories (${res.status})`);
+  return res.json() as Promise<ConnectedRepo[]>;
+}
+
+/** Reads a newline-delimited JSON progress stream. Resolves with the final event. */
+async function readIngestStream(res: Response, onEvent: (e: IngestEvent) => void): Promise<IngestEvent> {
+  if (!res.ok || !res.body) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const e: IngestEvent = { type: "error", message: body?.error ?? `Request failed (${res.status})` };
+    onEvent(e);
+    return e;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let last: IngestEvent = { type: "error", message: "The connection closed early" };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      last = JSON.parse(line) as IngestEvent;
+      onEvent(last);
+    }
+  }
+  return last;
+}
+
+export async function connectRepo(
+  input: { url: string; ref?: string } | { file: File },
+  onEvent: (e: IngestEvent) => void,
+): Promise<IngestEvent> {
+  let res: Response;
+  if ("file" in input) {
+    const form = new FormData();
+    form.append("file", input.file);
+    res = await fetch("/api/repos", { method: "POST", body: form });
+  } else {
+    res = await fetch("/api/repos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  }
+  return readIngestStream(res, onEvent);
+}
+
+export async function rescanRepo(id: string, onEvent: (e: IngestEvent) => void) {
+  const res = await fetch(`/api/repos/${encodeURIComponent(id)}/rescan`, { method: "POST" });
+  return readIngestStream(res, onEvent);
+}
+
+export async function removeRepo(id: string) {
+  const res = await fetch(`/api/repos/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error(`Could not remove the repository (${res.status})`);
 }
 
 /** Works out the impact. In live mode the server also creates the change. */

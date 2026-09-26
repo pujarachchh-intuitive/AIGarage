@@ -13,6 +13,7 @@ export default function Navbar() {
   const graph = useApp((s) => s.graph);
   const repoId = useApp((s) => s.repoId);
   const setRepo = useApp((s) => s.setRepo);
+  const repos = useApp((s) => s.repos);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -129,23 +130,39 @@ export default function Navbar() {
             {DATA_MODE === "live" ? "Live backend" : "Demo data"}
           </span>
         </div>
-        {DATA_MODE === "demo" ? (
+        {DATA_MODE === "demo" || repos.length > 0 ? (
           <label className="relative h-10 pl-3 pr-8 flex flex-col justify-center border border-border rounded-lg bg-surface shadow-2xs leading-tight hover:border-border-strong transition-colors cursor-pointer">
             <span className="text-caption text-text-tertiary">Repository</span>
             <select
               value={repoId}
               onChange={(e) => {
+                if (e.target.value === "__connect") {
+                  router.push("/repos/new");
+                  return;
+                }
                 void setRepo(e.target.value);
                 router.push("/overview");
               }}
               className="appearance-none bg-transparent text-body font-semibold text-text-primary focus:outline-none cursor-pointer"
               aria-label="Choose repository"
             >
-              {DEMO_REPOS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
+              {repos.length > 0 ? (
+                <optgroup label="Your repositories">
+                  {repos.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              <optgroup label="Samples">
+                {DEMO_REPOS.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </optgroup>
+              <option value="__connect">+ Connect a repository…</option>
             </select>
             <ChevronDown className="size-4 text-zinc-400 absolute right-2.5 top-3 pointer-events-none" />
           </label>

@@ -219,3 +219,33 @@ export interface Change {
   mode: DataMode;
   events: RunEvent[];
 }
+
+/** Numbers from a scan, shown on the Repositories page. */
+export interface RepoStats {
+  codeFiles: number;
+  files: number;
+  lines: number;
+  nodes: number;
+  edges: number;
+  imports: number;
+  layers: number;
+  truncated: boolean;
+  ms: number;
+}
+
+/** A repository a user connected (git URL or zip upload). */
+export interface ConnectedRepo {
+  id: string;
+  name: string;
+  source: "git" | "zip";
+  url?: string;
+  ref?: string;
+  scannedAt: string;
+  stats: RepoStats;
+}
+
+/** One line of the ingestion progress stream. */
+export type IngestEvent =
+  | { type: "progress"; step: string; detail: string; ms?: number }
+  | { type: "done"; repo: ConnectedRepo }
+  | { type: "error"; message: string };

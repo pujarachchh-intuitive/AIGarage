@@ -3,17 +3,20 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { DATA_MODE, DEMO_REPOS, fetchGraph } from "@/lib/api";
-import type { Change, Graph, RunEvent } from "@/lib/types";
+import { DATA_MODE, DEMO_REPOS, fetchGraph, listConnectedRepos } from "@/lib/api";
+import type { Change, ConnectedRepo, Graph, RunEvent } from "@/lib/types";
 
 interface AppState {
   graph: Graph | null;
   graphError: string | null;
   changes: Change[];
   hydrated: boolean;
-  /** Demo repo id (demo mode only). */
+  /** The repo on screen: a sample id or a connected repo id. */
   repoId: string;
   setRepo: (id: string) => Promise<void>;
+  /** Repositories the user connected. */
+  repos: ConnectedRepo[];
+  loadRepos: () => Promise<void>;
   loadGraph: () => Promise<void>;
   addChange: (change: Change) => void;
   appendEvent: (ev: RunEvent) => void;
@@ -33,6 +36,14 @@ export const useApp = create<AppState>()(
       setRepo: async (id) => {
         set({ repoId: id, graph: null });
         await get().loadGraph();
+      },
+      repos: [],
+      loadRepos: async () => {
+        try {
+          set({ repos: await listConnectedRepos() });
+        } catch {
+          set({ repos: [] });
+        }
       },
       loadGraph: async () => {
         if (get().graph) return;

@@ -36,7 +36,9 @@ export function NewChangeClient() {
   const addChange = useApp((s) => s.addChange);
   const nextChangeId = useApp((s) => s.nextChangeId);
   const repoId = useApp((s) => s.repoId);
-  const defaults = demoRepo(repoId).defaultChange;
+  // Samples have a preset demo change; connected repos start on their first renameable field.
+  const firstField = graph?.nodes.find((n) => RENAMEABLE.has(n.type))?.id ?? "";
+  const defaults = demoRepo(repoId)?.defaultChange ?? { node: firstField, to: "" };
 
   const [picked, setNodeId] = useState<string | null>(params.get("node"));
   const [kind, setKind] = useState<ChangeKind>("rename");
