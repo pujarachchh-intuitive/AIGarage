@@ -2,10 +2,11 @@
 
 import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Box, ChevronDown, GitBranch, Network } from "lucide-react";
+import { Box, ChevronDown, GitBranch, Network, Orbit } from "lucide-react";
 import { CityLegend } from "@/components/city/city-legend";
 import { City3DView } from "@/components/city/city-3d-view";
 import { CityMap } from "@/components/city/city-map";
+import { GraphView } from "@/components/city/graph-view";
 import { NodePanel } from "@/components/city/node-panel";
 import { PageHeader, PageShell, PrimaryLink } from "@/components/ui/page";
 import { cn } from "@/lib/cn";
@@ -19,7 +20,8 @@ export function CityClient() {
   const params = useSearchParams();
   const selected = params.get("node");
   const layer = (params.get("layer") as LayerId | null) ?? "all";
-  const view = params.get("view") === "3d" ? "3d" : "map";
+  const viewParam = params.get("view");
+  const view = viewParam === "3d" || viewParam === "graph" ? viewParam : "map";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params.toString());
@@ -48,11 +50,12 @@ export function CityClient() {
         }
         actions={
           <>
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-surface-secondary border border-border" role="tablist" aria-label="City view">
+            <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-surface-secondary border border-border" role="tablist" aria-label="City view">
               {(
                 [
                   ["map", "Dependency map", Network],
                   ["3d", "3D city", Box],
+                  ["graph", "Graph", Orbit],
                 ] as const
               ).map(([id, label, Icon]) => (
                 <button
@@ -70,7 +73,7 @@ export function CityClient() {
                 </button>
               ))}
             </div>
-            <div className={cn("relative", view === "3d" && "hidden")}>
+            <div className={cn("relative", view !== "map" && "hidden")}>
               <select
                 value={layer}
                 onChange={(e) => setParam("layer", e.target.value === "all" ? null : e.target.value)}
@@ -94,7 +97,28 @@ export function CityClient() {
         }
       />
 
-      {view === "3d" ? (
+      {view === "graph" ? (
+        <div className="flex gap-4 flex-1 min-h-[600px]">
+          {graph ? (
+            <GraphView
+              graph={graph}
+              selectedId={selected}
+              onSelect={(id) => setParam("node", id)}
+              className="flex-1 min-h-[600px]"
+            />
+          ) : (
+            <div className="flex-1 min-h-[600px] rounded-xl bg-zinc-50 animate-pulse" />
+          )}
+          {graph && selected ? (
+            <NodePanel
+              graph={graph}
+              nodeId={selected}
+              onSelect={(id) => setParam("node", id)}
+              onClose={() => setParam("node", null)}
+            />
+          ) : null}
+        </div>
+      ) : view === "3d" ? (
         graph ? (
           <City3DView
             graph={graph}
