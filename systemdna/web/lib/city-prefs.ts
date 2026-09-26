@@ -23,6 +23,10 @@ export interface GraphPrefs {
   linkDistance: number;
   /** Obsidian-style local graph: only nodes within N hops of the selected node. 0 = off. */
   localDepth: 0 | 1 | 2 | 3;
+  /** Draw the graph as a galaxy: stars, planets, nebulae and comets. */
+  space: boolean;
+  /** Space theme: the galaxy turns slowly on its own. */
+  autoRotate: boolean;
 }
 
 export interface CityPrefs {
@@ -61,6 +65,8 @@ export const GRAPH_DEFAULTS: GraphPrefs = {
   linkStrength: 0.7,
   linkDistance: 36,
   localDepth: 0,
+  space: true,
+  autoRotate: true,
 };
 
 export const PREF_DEFAULTS: CityPrefs = {

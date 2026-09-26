@@ -15,6 +15,7 @@ import {
 } from "d3-force";
 import { Minus, Plus, LocateFixed, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { districtColor } from "@/components/city/city-3d";
+import { COSMIC, drawBackground, drawGalaxy, SPACE_BG } from "@/components/city/space-render";
 import { cn } from "@/lib/cn";
 import { canvasToPng, registerSnapshot } from "@/lib/city-export";
 import { GRAPH_DEFAULTS, useCityPrefs, type GraphPrefs } from "@/lib/city-prefs";
@@ -166,11 +167,15 @@ export function GraphView({
       neighbors.get(a)!.add(b);
       neighbors.get(b)!.add(a);
     }
-    return { nodes: visibleNodes, links: finalLinks, neighbors };
+    // Space theme: the best-connected few percent of nodes shine as stars.
+    const degrees = visibleNodes.map((n) => n.degree).sort((a, b) => a - b);
+    const hubDegree = Math.max(8, degrees[Math.floor(degrees.length * 0.96)] ?? 8);
+    return { nodes: visibleNodes, links: finalLinks, neighbors, hubDegree };
   }, [graph, settings.showFields, settings.showContains, settings.showOrphans, settings.localDepth, localRoot]);
 
   // Everything the draw loop needs, kept in refs so pan/zoom/hover never re-render React.
-  const view = useRef({ k: 1, x: 0, y: 0, w: 1, h: 1, dpr: 1 });
+  // rot: the galaxy's turn (radians) around the middle of the screen; space theme only.
+  const view = useRef({ k: 1, x: 0, y: 0, w: 1, h: 1, dpr: 1, rot: 0 });
   const state = useRef({ hovered: null as string | null, selected: selectedId ?? null, settings, tokens: null as Tokens | null, fitted: false, interacted: false });
   const simRef = useRef<Simulation<GNode, GLink> | null>(null);
   const nodesRef = useRef<GNode[]>([]);
@@ -190,6 +195,27 @@ export function GraphView({
     if (!host || !canvas) return;
     const ctx = canvas.getContext("2d")!;
     let frame = 0;
+    // Space theme animates (twinkle, comets, orbits) unless the OS asks for less motion.
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const started = performance.now();
+    let loop = 0;
+    let skip = false;
+    let last = performance.now();
+    // Auto-rotate pauses while you point at a body or drag, and for a moment after.
+    let lastInput = 0;
+    const ROTATE_SPEED = (Math.PI * 2) / 240; // one turn every 4 minutes
+    const animate = (now: number) => {
+      loop = requestAnimationFrame(animate);
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      const cfg = state.current.settings;
+      if (!cfg.space || reduced || document.hidden) return;
+      if (cfg.autoRotate && !drag && !state.current.hovered && now - lastInput > 2500) view.current.rot += dt * ROTATE_SPEED;
+      // Big graphs draw at half rate to stay smooth.
+      if (nodesRef.current.length > 1500 && (skip = !skip)) return;
+      draw();
+    };
+    loop = requestAnimationFrame(animate);
     const requestDraw = () => {
       if (!frame) frame = requestAnimationFrame(() => {
         frame = 0;
@@ -227,13 +253,45 @@ export function GraphView({
       const links = linksRef.current;
       ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
       ctx.clearRect(0, 0, v.w, v.h);
-      ctx.translate(v.x, v.y);
-      ctx.scale(v.k, v.k);
 
       const active = s.hovered ?? s.selected;
       const neighbors = active ? model.neighbors.get(active) ?? new Set<string>() : null;
       const q = cfg.search.trim().toLowerCase();
       const matches = q ? new Set(nodes.filter((n) => n.label.toLowerCase().includes(q)).map((n) => n.id)) : null;
+
+      if (cfg.space) {
+        const time = reduced ? 0 : (performance.now() - started) / 1000;
+        drawBackground(ctx, v.w, v.h, v.x, v.y, time, !reduced);
+        // The galaxy turns around the middle of the screen; the starfield stays put.
+        ctx.translate(v.w / 2, v.h / 2);
+        ctx.rotate(v.rot);
+        ctx.translate(-v.w / 2, -v.h / 2);
+        ctx.translate(v.x, v.y);
+        ctx.scale(v.k, v.k);
+        drawGalaxy(ctx, {
+          nodes,
+          links,
+          k: v.k,
+          t: time,
+          animate: !reduced,
+          active,
+          selected: s.selected,
+          neighbors,
+          matches,
+          byLayer: cfg.colorByLayer,
+          layerIndex,
+          nodeSize: cfg.nodeSize,
+          linkWidth: cfg.linkWidth,
+          arrows: cfg.arrows,
+          labelZoom: cfg.labelZoom,
+          hubDegree: model.hubDegree,
+          font: t.font,
+          rot: v.rot,
+        });
+        return;
+      }
+      ctx.translate(v.x, v.y);
+      ctx.scale(v.k, v.k);
       const inFocus = (id: string) => {
         if (matches && !matches.has(id)) return false;
         if (active) return id === active || neighbors!.has(id);
@@ -363,11 +421,23 @@ export function GraphView({
 
     // Pointer input: drag a node to move it, drag empty space to pan, wheel to zoom.
     let drag: { node: GNode | null; sx: number; sy: number; vx: number; vy: number; moved: boolean } | null = null;
+    // Pointer position in the unrotated frame, so hit tests, drags, pans and zooms
+    // work the same while the galaxy turns.
     const pos = (e: PointerEvent | WheelEvent) => {
       const r = canvas.getBoundingClientRect();
-      return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+      const v = view.current;
+      const px = e.clientX - r.left;
+      const py = e.clientY - r.top;
+      const rot = state.current.settings.space ? v.rot : 0;
+      if (!rot) return { sx: px, sy: py };
+      const cx = v.w / 2;
+      const cy = v.h / 2;
+      const cos = Math.cos(-rot);
+      const sin = Math.sin(-rot);
+      return { sx: cx + (px - cx) * cos - (py - cy) * sin, sy: cy + (px - cx) * sin + (py - cy) * cos };
     };
     const onDown = (e: PointerEvent) => {
+      lastInput = performance.now();
       const { sx, sy } = pos(e);
       const node = nodeAt(sx, sy);
       drag = { node, sx, sy, vx: view.current.x, vy: view.current.y, moved: false };
@@ -391,6 +461,7 @@ export function GraphView({
         }
         return;
       }
+      lastInput = performance.now();
       if (Math.hypot(sx - drag.sx, sy - drag.sy) > 3) drag.moved = true;
       if (drag.node) {
         const p = toGraph(sx, sy);
@@ -422,6 +493,7 @@ export function GraphView({
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      lastInput = performance.now();
       const { sx, sy } = pos(e);
       const v = view.current;
       const k = Math.max(0.1, Math.min(8, v.k * Math.exp(-e.deltaY * 0.0015)));
@@ -443,12 +515,13 @@ export function GraphView({
     resize();
     const unregister = registerSnapshot(() => {
       draw();
-      return canvasToPng(canvas, state.current.tokens?.background ?? "#FFFFFF");
+      return canvasToPng(canvas, state.current.settings.space ? SPACE_BG : (state.current.tokens?.background ?? "#FFFFFF"));
     });
 
     return () => {
       unregister();
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(loop);
       ro.disconnect();
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
@@ -548,11 +621,20 @@ export function GraphView({
     drawRef.current();
   };
 
-  const iconBtn =
-    "cursor-pointer flex items-center justify-center size-9 bg-surface border border-border rounded-lg text-icon-secondary hover:text-text-primary hover:bg-surface-hover hover:border-border-strong shadow-2xs active:scale-95 transition-all duration-150";
+  const space = settings.space;
+  const iconBtn = cn(
+    "cursor-pointer flex items-center justify-center size-9 rounded-lg active:scale-95 transition-all duration-150",
+    space
+      ? "bg-white/[0.06] border border-white/15 text-white/75 backdrop-blur-md hover:text-white hover:bg-white/[0.12] hover:border-white/30 shadow-[0_0_18px_rgba(120,140,255,0.15)]"
+      : "bg-surface border border-border text-icon-secondary hover:text-text-primary hover:bg-surface-hover hover:border-border-strong shadow-2xs",
+  );
 
   return (
-    <div ref={hostRef} className={cn("relative overflow-hidden rounded-xl border border-border bg-background select-none", className)}>
+    <div
+      ref={hostRef}
+      className={cn("relative overflow-hidden rounded-xl border select-none", space ? "border-indigo-400/20" : "border-border bg-background", className)}
+      style={space ? { background: SPACE_BG } : undefined}
+    >
       <canvas ref={canvasRef} className="absolute inset-0 cursor-grab" />
 
       {/* Settings, like Obsidian's graph panel */}
@@ -603,6 +685,8 @@ export function GraphView({
               </div>
               <div className="flex flex-col gap-2 pt-3 border-t border-border">
                 <p className="type-label">Display</p>
+                <Toggle label="Space theme" checked={settings.space} onChange={(v) => set("space", v)} />
+                {settings.space ? <Toggle label="Auto-rotate" checked={settings.autoRotate} onChange={(v) => set("autoRotate", v)} /> : null}
                 <Toggle label="Arrows" checked={settings.arrows} onChange={(v) => set("arrows", v)} />
                 <Toggle label="Colour by district" checked={settings.colorByLayer} onChange={(v) => set("colorByLayer", v)} />
                 <Slider label="Node size" value={settings.nodeSize} min={0.5} max={2.5} step={0.1} onChange={(v) => set("nodeSize", v)} />
@@ -645,15 +729,26 @@ export function GraphView({
         </button>
       </div>
 
-      <div className="absolute bottom-3 left-3 flex items-center gap-4 type-caption">
+      <div className={cn("absolute bottom-3 left-3 flex items-center gap-4 type-caption", space && "text-indigo-100/60")}>
         <span>
-          <span className="text-body font-semibold text-text-primary">{model.nodes.length}</span> nodes
+          <span className={cn("text-body font-semibold", space ? "text-white" : "text-text-primary")}>{model.nodes.length}</span> {space ? "bodies" : "nodes"}
         </span>
         <span>
-          <span className="text-body font-semibold text-text-primary">{model.links.length}</span> links
+          <span className={cn("text-body font-semibold", space ? "text-white" : "text-text-primary")}>{model.links.length}</span> links
         </span>
-        <span>drag to pan · scroll to zoom · drag a dot to move it</span>
+        <span className="hidden md:inline">drag to pan · scroll to zoom · drag a {space ? "planet" : "dot"} to move it</span>
       </div>
+
+      {space && settings.colorByLayer ? (
+        <div className="absolute bottom-3 right-3 hidden md:flex flex-wrap justify-end gap-x-3 gap-y-1 max-w-[55%] px-3 py-2 rounded-xl bg-white/[0.05] border border-white/10 backdrop-blur-md">
+          {graph.layers.map((l, i) => (
+            <span key={l.id} className="inline-flex items-center gap-1.5 text-caption text-indigo-100/80">
+              <span className="size-2.5 rounded-full" style={{ background: COSMIC[i % COSMIC.length], boxShadow: `0 0 8px ${COSMIC[i % COSMIC.length]}` }} />
+              {l.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
