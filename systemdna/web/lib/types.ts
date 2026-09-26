@@ -142,12 +142,50 @@ export type Severity = "breaking" | "needs_update" | "update" | "safe";
 export interface ImpactItem {
   nodeId: string;
   severity: Severity;
-  /** Longest path from the changed node. 0 = the changed node itself. */
+  /**
+   * Step in the fix order. 0 = the changed node. A node's step is one more than
+   * the step of everything that reaches it; nodes in one loop share a step.
+   */
   depth: number;
+  /** 0 to 100. The sum of `factors`, capped. */
   risk: number;
   viaEdge?: string;
+  /** The weakest link on the path from the change: a chain is only as sure as its weakest link. */
   confidence: Confidence;
   needsApproval: boolean;
+  /** Why the risk is what it is, biggest first. */
+  factors?: RiskFactor[];
+  /** Node ids from the changed node to this one, along the strongest path. */
+  path?: string[];
+  /** How many affected links reach this node. More than one means it breaks in more than one way. */
+  links?: number;
+}
+
+export interface RiskFactor {
+  /** Short label, for example "Public API". */
+  label: string;
+  points: number;
+  /** One plain sentence. */
+  detail: string;
+}
+
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+
+/** The risk of the whole change. */
+export interface RiskAssessment {
+  /** 0 to 100. */
+  score: number;
+  level: RiskLevel;
+  /** The main reasons for the score, biggest first. */
+  drivers: RiskFactor[];
+  /** What to do about it, most important first. */
+  recommendations: string[];
+  /** Affected components by how sure the engine is. */
+  confidence: Record<Confidence, number>;
+  /** Files that must change, by whether a test covers them. `known` is false when the repo has no tests at all. */
+  coverage: { tested: number; untested: number; known: boolean };
+  /** The riskiest affected components (node ids), riskiest first. */
+  hotspots: string[];
 }
 
 /** One file that one agent will fix. `id` is the file path. */
@@ -177,6 +215,8 @@ export interface ImpactReport {
   levels: string[][];
   danglingRefs: number;
   computedMs: number;
+  /** The risk of the whole change. Missing on reports made before it existed. */
+  risk?: RiskAssessment;
 }
 
 export type RunEventType =

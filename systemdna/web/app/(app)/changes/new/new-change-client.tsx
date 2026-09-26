@@ -11,6 +11,7 @@ import {
   BusinessCard,
   GrepCard,
   ImpactKpis,
+  RiskCard,
   WavesCard,
 } from "@/components/changes/impact-report";
 import { Card, PageHeader, PageShell, inputClass, primaryButton, secondaryButton } from "@/components/ui/page";
@@ -333,6 +334,7 @@ export function NewChangeClient() {
       {result && graph ? (
         <div key={rippleKey} className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-500">
           <ImpactKpis report={result.report} />
+          <RiskCard report={result.report} />
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8 flex flex-col gap-3">
               <h2 className="type-heading">Affected components</h2>
