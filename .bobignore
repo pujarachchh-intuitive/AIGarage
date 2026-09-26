@@ -92,4 +92,5 @@ id_dsa
 # SystemDNA project additions (keep Bob's context small)
 node_modules/
 dist/
-web/package-lock.json
+**/package-lock.json
+.next/

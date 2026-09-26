@@ -2,20 +2,27 @@
 
 SystemDNA scans a code repository into a cross-layer knowledge graph and predicts what one change, such as renaming a database column, will break across every layer. It then shows parallel IBM Bob agents fixing each affected part live in a 3D "Agent City".
 
-## Frontend (web/)
+## Repository layout
 
-React 18 + Vite + TypeScript + Tailwind, with React Three Fiber for the 3D City and Synapse views. The UI is built against a mock data layer that matches the PRD contracts. `VITE_DATA_MODE=mock|live` switches between the mock data and the real backend.
+| Path | What it is |
+|---|---|
+| `systemdna/web/` | The Agent City dashboard (Next.js, TypeScript, Tailwind, Cytoscape + three.js). See its [README](systemdna/web/README.md). |
+| `systemdna/core/scanner/` | TypeScript repo scanner that produces `graph.json` |
+| `bob_sessions/<role>/` | Exported IBM Bob task histories and usage screenshots, one folder per teammate ([index](bob_sessions/README.md)) |
+| `TEAM_PLAN.md` | Who owns what, hand-off contracts and checkpoints |
+| `SystemDNA — PRD (IBM Bob 2.0 Hackathon).md` | Product requirements |
+
+## Run the dashboard
 
 ```bash
-cd web
+cd systemdna/web
 npm install
-cp .env.example .env   # VITE_DATA_MODE=mock; no tokens
-npm run dev            # dev server
-npx vitest run         # tests
-npm run build          # static build to web/dist
+npm run dev     # http://localhost:3000, demo data unless NEXT_PUBLIC_API_URL is set
+npm test        # contract tests
+npm run build
 ```
 
-Bob session exports and consumption screenshots are in [bob_sessions/](bob_sessions/README.md).
+Never put the demo write token in an env file. Type it into the dashboard's Settings page instead.
 
 ---
 

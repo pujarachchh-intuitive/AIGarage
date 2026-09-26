@@ -1,35 +1,41 @@
 # Bob Sessions
 
-This directory contains evidence and exports from each IBM Bob IDE session, tracking progress across the SystemDNA frontend build.
+Evidence from every IBM Bob session, as the hackathon rules require. Each teammate has a folder named
+after their role (`cp1`, `cp2`, `fde1` … `fde4`, see `TEAM_PLAN.md`), with one sub-folder per session.
 
-## Session Overview
+```text
+bob_sessions/
+  fde4/
+    fe-01-contracts-mock-data/
+      bob-task-<id>-<date>.md      task history, exported from Bob, unedited
+      bob-task-<id>-<date>.json    the same task as Bob's JSON export, unedited
+      consumption-summary.png      screenshot of the task's usage summary
+      NOTES.md                     goal, files changed, commit, work done outside Bob
+      prompt.txt                   the prompt given to Bob
+```
 
-| Task | Claude work (before/after) | Bob session | Evidence folder | Commit | Bobcoins used |
-|------|----------------------------|-------------|-----------------|--------|---------------|
-| T1 | Scaffold (T0), review of types | B1 contracts + mock data | fe-01-contracts-mock-data/ | | |
-| T3 | 3D city scene (T4), zoom (T5) on top | B2 3D city layout engine | fe-02-city-layout-engine/ | | |
-| T6 | Synapse glow polish, view crossfade | B7 3D synapse neural view | fe-07-synapse-neural-view/ | | |
-| T7 | Store wiring, ripple + worker visuals (T8) | B3 state machine + ripple | fe-03-state-machine-ripple/ | | |
-| T10 | HUD panel restyle | B4 observability panels + 3D diff | fe-04-observability-panels/ | | |
-| T11 | Mode switch styling | B5 cinematic replay + live source | fe-05-replay-live-source/ | | |
-| T13 | Env switch, live smoke test | B8 backend integration | fe-08-backend-integration/ | | |
-| T12 | Final QA | B6 review + hardening | fe-06-review-hardening/ | | |
+## FDE4 (frontend) sessions
 
-**Total target**: ~35 Bobcoins (5 reserved)
+The dashboard is `systemdna/web`. The sessions after B1 target that app.
 
-## What Goes in Each Folder
+| Session | Feature slice | Evidence folder | Commit | Bobcoins |
+|---|---|---|---|---|
+| B1 | Contracts + mock data (checks now run as `systemdna/web/lib/__tests__/contracts.test.ts`) | `fde4/fe-01-contracts-mock-data/` | 17ba11b | 5.83 |
+| B2 | 3D city layout engine + tests | `fde4/fe-02-city-layout-engine/` | | |
+| B7 | 3D synapse (neural mind-map) view | `fde4/fe-07-synapse-neural-view/` | | |
+| B3 | Ripple scheduler + building/agent state tests | `fde4/fe-03-state-machine-ripple/` | | |
+| B4 | Trace, metrics, governance, graph diff panels | `fde4/fe-04-observability-panels/` | | |
+| B5 | Replay mode + live WebSocket backfill | `fde4/fe-05-replay-live-source/` | | |
+| B8 | Backend integration adapters + contract tests | `fde4/fe-08-backend-integration/` | | |
+| B6 | Performance, accessibility and security review | `fde4/fe-06-review-hardening/` | | |
 
-1. **Task history** - Exact export from Bob IDE (Markdown, unedited)
-2. **consumption-summary.png** - Screenshot of Bob's consumption summary
-3. **NOTES.md** - Your notes: goal, files changed, commit hash
+**Budget:** 40 Bobcoins per person, about 35 planned, 5 in reserve.
 
-## Export Checklist
-
-After each Bob session:
+## Export checklist (after every session)
 
 - [ ] Session finished or stopped deliberately
-- [ ] Task history exported to Markdown into session folder
-- [ ] Consumption-summary screenshot saved
+- [ ] Task history exported (Markdown, and JSON if offered) into the session folder
+- [ ] Consumption-summary screenshot saved in the same folder
 - [ ] Export read through for secrets before committing
-- [ ] NOTES.md written, table row above filled in
-- [ ] Code and evidence committed together with `Tn: ... (Bob Bn)` message
+- [ ] `NOTES.md` written and the table row above filled in
+- [ ] Code and evidence committed together with a `Tn: ... (Bob Bn)` message
