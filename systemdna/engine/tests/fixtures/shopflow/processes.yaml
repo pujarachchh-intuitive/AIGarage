@@ -1,0 +1,13 @@
+processes:
+  - id: revenue_close
+    name: Monthly Revenue Close
+    owner: Finance
+    criticality: high
+    source: revenue
+    description: Monthly finance close driven by revenue dashboard.
+
+  - id: retention_review
+    name: Retention Review
+    owner: Marketing
+    source: churn
+    description: Marketing retention review driven by churn dashboard.
