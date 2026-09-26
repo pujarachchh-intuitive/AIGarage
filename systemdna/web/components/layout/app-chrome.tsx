@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import Navbar from "@/components/layout/navbar";
 import Sidebar from "@/components/layout/sidebar";
+import { useCityPrefs } from "@/lib/city-prefs";
 import { useApp } from "@/lib/store";
 
 export function AppChrome({ children }: { children: ReactNode }) {
@@ -11,6 +12,7 @@ export function AppChrome({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void Promise.resolve(useApp.persist.rehydrate()).then(() => loadGraph());
+    void useCityPrefs.persist.rehydrate();
     void loadRepos();
   }, [loadGraph, loadRepos]);
 

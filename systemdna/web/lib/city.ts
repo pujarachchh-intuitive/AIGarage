@@ -127,8 +127,13 @@ export interface CityLayout {
   size: { w: number; d: number };
 }
 
+/** Building height from how many files import this one (log scale). */
+export function importHeight(importedBy: number) {
+  return 1.2 + 6 * Math.log2(importedBy + 1);
+}
+
 /** Packs district plates in rows, and files in a grid on each plate. */
-export function layoutCity(data: CityData): CityLayout {
+export function layoutCity(data: CityData, height: "lines" | "imports" = "lines"): CityLayout {
   const plates = data.districts.map((d) => {
     const cols = Math.ceil(Math.sqrt(d.files.length));
     const rows = Math.ceil(d.files.length / cols);
@@ -153,7 +158,7 @@ export function layoutCity(data: CityData): CityLayout {
     p.d.files.forEach((f, i) => {
       const cx = x + PLATE_PAD + (i % p.cols) * CELL + CELL / 2;
       const cz = z + PLATE_PAD + Math.floor(i / p.cols) * CELL + CELL / 2;
-      positions.set(f.path, { x: cx, z: cz, h: buildingHeight(f.lines) });
+      positions.set(f.path, { x: cx, z: cz, h: height === "imports" ? importHeight(f.importedBy.length) : buildingHeight(f.lines) });
     });
     x += p.w + DISTRICT_GAP;
     width = Math.max(width, x - DISTRICT_GAP);

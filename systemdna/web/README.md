@@ -84,7 +84,6 @@ Pick one with the Repository switch in the top bar.
 | Repo | Where the graph comes from | Demo change |
 | --- | --- | --- |
 | `marketplace-dashboard` (default) | Real. Built by `core/scanner/ts-scan.mjs` from [krishil-agrawal-itp/marketplace-dashboard](https://github.com/krishil-agrawal-itp/marketplace-dashboard), cloned in `samples/marketplace-dashboard`. Saved as `lib/mock/marketplace-dashboard.graph.json` | Rename `Deployment.successRate` to `deploySuccessRate`: 6 files in 2 waves. Grep flags 2 extra files that use a different `ProductRow.successRate` |
-| `samples/shopflow` | Hand-made in `lib/mock/shopflow.ts` to match the PRD's 7-layer sample (SQL, PySpark, API, React) | Rename `orders.cust_id` to `customer_id`: 18 files in 7 waves. Grep misses the 2 files that feed Finance |
 
 To re-scan the sample repo after it changes (run `npm install` in `../core/scanner` once first):
 
@@ -99,6 +98,7 @@ npm run scan:sample
 | `/overview` | KPIs, components per district, how links were found, recent changes, agent activity |
 | `/repos` | Connected repositories and samples; `/repos/new` connects a new one |
 | `/city` | The Agent City. Three views: **Dependency map** (the knowledge graph as districts and roads) and **3D city** (`?view=3d`: one building per file, height = lines of code on a log scale, plates = top-level folders, arcs = imports, caps = entry point, core modules and hotspots) and **Graph** (`?view=graph`: an Obsidian-style force graph of every node, sized by link count, with search, filters, display and force settings) |
+| | Agent City toolbar: **Full screen** (whole view with its panels; falls back to filling the window where the browser blocks full screen), **Image** (PNG of the current view), **Preferences** (saved in the browser: start view, map legend, 3D height by lines or imports, colour, arcs, labels, auto-rotate, graph local depth), **Keyboard shortcuts** (`1` `2` `3` views, `F` full screen, `Esc` clear, `?` help). The selection carries across all three views |
 | `/changes/new` | Pick a column or field, give it a new name, see the ripple, the fix plan, business impact and the grep comparison |
 | `/changes/[id]` | The live run: approval gate, agents on the map, trace, agents table, governance, graph diff, report download |
 | `/changes` | All changes |
@@ -125,5 +125,5 @@ components/ui/        badge, status badge, table, KPI tile, page shell, empty st
 components/city/      city map (Cytoscape), legend, node panel
 components/changes/   impact report parts, run panels
 lib/                  types, impact engine, run state, simulator, API client, store, theme, report
-lib/mock/             ShopFlow demo graph
+lib/mock/             marketplace-dashboard demo graph
 ```

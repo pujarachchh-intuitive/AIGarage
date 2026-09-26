@@ -120,6 +120,7 @@ async function unzipTo(data: Uint8Array, dir: string) {
 }
 
 async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt" | "stats">, emit: Emit, existingId?: string) {
+  const scanStart = Date.now();
   const size = await measure(dir);
   if (size.files > LIMITS.repoFiles) throw new Error(`The repo has more than ${LIMITS.repoFiles} files. Try a smaller repo or a sub-folder.`);
   if (size.bytes > LIMITS.repoBytes) throw new Error(`The repo is larger than ${LIMITS.repoBytes / 1024 / 1024} MB.`);
@@ -147,7 +148,7 @@ async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt"
   });
   if (!stats) throw new Error("The scanner finished without a result.");
   const entry: RepoEntry = { ...meta, id: existingId ?? makeRepoId(meta.name), scannedAt: new Date().toISOString(), stats };
-  await saveRepo(entry, out);
+  await saveRepo(entry, out, Date.now() - scanStart);
   emit({ type: "progress", step: "saved", detail: "Saved the knowledge graph" });
   return entry;
 }

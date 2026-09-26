@@ -13,9 +13,11 @@ import {
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
-import { Maximize2, Minus, Plus, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { Minus, Plus, Scan, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { districtColor } from "@/components/city/city-3d";
 import { cn } from "@/lib/cn";
+import { canvasToPng, registerSnapshot } from "@/lib/city-export";
+import { GRAPH_DEFAULTS, useCityPrefs, type GraphPrefs } from "@/lib/city-prefs";
 import { useIsDark } from "@/lib/theme";
 import { readTokens, type Tokens } from "@/lib/tokens";
 import type { Graph } from "@/lib/types";
@@ -39,37 +41,8 @@ interface GLink extends SimulationLinkDatum<GNode> {
   weight: number;
 }
 
-interface Settings {
-  search: string;
-  showFields: boolean;
-  showContains: boolean;
-  showOrphans: boolean;
-  arrows: boolean;
-  colorByLayer: boolean;
-  nodeSize: number;
-  linkWidth: number;
-  labelZoom: number;
-  center: number;
-  repel: number;
-  linkStrength: number;
-  linkDistance: number;
-}
-
-const DEFAULTS: Settings = {
-  search: "",
-  showFields: true,
-  showContains: true,
-  showOrphans: true,
-  arrows: false,
-  colorByLayer: false,
-  nodeSize: 1,
-  linkWidth: 1,
-  labelZoom: 2.2,
-  center: 0.05,
-  repel: 90,
-  linkStrength: 0.7,
-  linkDistance: 36,
-};
+// Settings are saved in the browser (lib/city-prefs.ts). Search is not saved.
+type Settings = GraphPrefs & { search: string };
 
 const endId = (x: string | GNode) => (typeof x === "string" ? x : x.id);
 
@@ -116,9 +89,16 @@ export function GraphView({
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDark = useIsDark();
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const graphPrefs = useCityPrefs((s) => s.graph);
+  const setGraph = useCityPrefs((s) => s.setGraph);
+  const [search, setSearch] = useState("");
+  const settings: Settings = useMemo(() => ({ ...graphPrefs, search }), [graphPrefs, search]);
   const [panelOpen, setPanelOpen] = useState(false);
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setSettings((s) => ({ ...s, [k]: v }));
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
+    if (k === "search") setSearch(v as string);
+    else setGraph({ [k]: v } as Partial<GraphPrefs>);
+  };
+  const localRoot = settings.localDepth > 0 ? (selectedId ?? null) : null;
 
   const layerIndex = useMemo(() => new Map(graph.layers.map((l, i) => [l.id, i])), [graph.layers]);
 
@@ -148,8 +128,35 @@ export function GraphView({
         const d = degree.get(n.id) ?? 0;
         return { id: n.id, label: n.name, type: n.type, layer: n.layer, degree: d, r: 1.6 + Math.sqrt(d) * 0.75 };
       });
-    const nodeIds = new Set(nodes.map((n) => n.id));
-    const finalLinks = links.filter((l) => nodeIds.has(endId(l.source)) && nodeIds.has(endId(l.target)));
+    let nodeIds = new Set(nodes.map((n) => n.id));
+    let finalLinks = links.filter((l) => nodeIds.has(endId(l.source)) && nodeIds.has(endId(l.target)));
+
+    // Local graph: keep only nodes within N hops of the selected node.
+    if (localRoot && nodeIds.has(localRoot)) {
+      const adj = new Map<string, string[]>();
+      for (const l of finalLinks) {
+        const a = endId(l.source);
+        const b = endId(l.target);
+        adj.set(a, [...(adj.get(a) ?? []), b]);
+        adj.set(b, [...(adj.get(b) ?? []), a]);
+      }
+      const keepIds = new Set([localRoot]);
+      let frontier = [localRoot];
+      for (let d = 0; d < settings.localDepth; d++) {
+        const next: string[] = [];
+        for (const id of frontier) {
+          for (const nb of adj.get(id) ?? []) {
+            if (keepIds.has(nb)) continue;
+            keepIds.add(nb);
+            next.push(nb);
+          }
+        }
+        frontier = next;
+      }
+      nodeIds = keepIds;
+      finalLinks = finalLinks.filter((l) => keepIds.has(endId(l.source)) && keepIds.has(endId(l.target)));
+    }
+    const visibleNodes = nodes.filter((n) => nodeIds.has(n.id));
     const neighbors = new Map<string, Set<string>>();
     for (const l of finalLinks) {
       const a = endId(l.source);
@@ -159,8 +166,8 @@ export function GraphView({
       neighbors.get(a)!.add(b);
       neighbors.get(b)!.add(a);
     }
-    return { nodes, links: finalLinks, neighbors };
-  }, [graph, settings.showFields, settings.showContains, settings.showOrphans]);
+    return { nodes: visibleNodes, links: finalLinks, neighbors };
+  }, [graph, settings.showFields, settings.showContains, settings.showOrphans, settings.localDepth, localRoot]);
 
   // Everything the draw loop needs, kept in refs so pan/zoom/hover never re-render React.
   const view = useRef({ k: 1, x: 0, y: 0, w: 1, h: 1, dpr: 1 });
@@ -434,8 +441,13 @@ export function GraphView({
     const ro = new ResizeObserver(resize);
     ro.observe(host);
     resize();
+    const unregister = registerSnapshot(() => {
+      draw();
+      return canvasToPng(canvas, state.current.tokens?.background ?? "#FFFFFF");
+    });
 
     return () => {
+      unregister();
       cancelAnimationFrame(frame);
       ro.disconnect();
       canvas.removeEventListener("pointerdown", onDown);
@@ -568,6 +580,26 @@ export function GraphView({
                 <Toggle label="Fields" checked={settings.showFields} onChange={(v) => set("showFields", v)} />
                 <Toggle label="Containment links" checked={settings.showContains} onChange={(v) => set("showContains", v)} />
                 <Toggle label="Orphans" checked={settings.showOrphans} onChange={(v) => set("showOrphans", v)} />
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <span className="flex items-center justify-between">
+                    <span className="text-body text-text-primary">Local graph</span>
+                    <span className="type-caption">{selectedId ? "hops from selected" : "select a node first"}</span>
+                  </span>
+                  <div className="grid grid-cols-4 gap-1 p-1 rounded-lg bg-surface-secondary border border-border">
+                    {([0, 1, 2, 3] as const).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => set("localDepth", d)}
+                        className={cn(
+                          "cursor-pointer h-7 rounded-md text-caption font-semibold transition-colors",
+                          settings.localDepth === d ? "bg-surface text-text-primary shadow-2xs border border-border" : "text-text-tertiary hover:text-text-primary",
+                        )}
+                      >
+                        {d === 0 ? "Off" : d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div className="flex flex-col gap-2 pt-3 border-t border-border">
                 <p className="type-label">Display</p>
@@ -587,7 +619,7 @@ export function GraphView({
                   <button onClick={() => simRef.current?.alpha(1).restart()} className="cursor-pointer flex-1 inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-border bg-surface hover:bg-surface-hover text-caption font-semibold text-text-secondary">
                     <Sparkles className="size-3.5" /> Animate
                   </button>
-                  <button onClick={() => setSettings({ ...DEFAULTS, search: settings.search })} className="cursor-pointer flex-1 h-8 rounded-lg border border-border bg-surface hover:bg-surface-hover text-caption font-semibold text-text-secondary">
+                  <button onClick={() => setGraph(GRAPH_DEFAULTS)} className="cursor-pointer flex-1 h-8 rounded-lg border border-border bg-surface hover:bg-surface-hover text-caption font-semibold text-text-secondary">
                     Reset
                   </button>
                 </div>
@@ -608,8 +640,8 @@ export function GraphView({
         <button className={iconBtn} onClick={() => zoomBy(0.8)} aria-label="Zoom out">
           <Minus className="size-4" />
         </button>
-        <button className={iconBtn} onClick={() => fitRef.current()} aria-label="Fit to screen">
-          <Maximize2 className="size-4" />
+        <button className={iconBtn} onClick={() => fitRef.current()} aria-label="Fit to screen" title="Fit everything in view">
+          <Scan className="size-4" />
         </button>
       </div>
 

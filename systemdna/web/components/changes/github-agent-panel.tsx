@@ -76,6 +76,11 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
         ? "The agent handles renames of TypeScript fields today. This change is analysis only."
         : null;
 
+  // Find the connected repo id (for graph enrichment).
+  const targetRepoId = useMemo(() => {
+    return repos.find((r) => r.name === change.repo && r.source === "git" && r.url)?.id;
+  }, [repos, change.repo]);
+
   const run = async (dryRun: boolean) => {
     if (!target || !node) return;
     setBusy(dryRun ? "preview" : "pr");
@@ -92,6 +97,7 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
         title: `Rename ${node.name} to ${change.request.to}`,
         body: `${reportMarkdown()}\n\n---\nOpened by the SystemDNA GitHub agent. Edits come from the TypeScript compiler's rename and were checked for new type errors.`,
         dryRun,
+        repoId: targetRepoId,
       },
       (e) => {
         if (e.type === "progress") setSteps((s) => [...s, e.detail]);

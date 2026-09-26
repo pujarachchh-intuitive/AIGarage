@@ -5,7 +5,6 @@
 
 import { computeImpact } from "@/lib/impact";
 import marketplaceGraph from "@/lib/mock/marketplace-dashboard.graph.json";
-import { shopflowGraph } from "@/lib/mock/shopflow";
 import type { AgentEvent, ChangeRequest, ConnectedRepo, DataMode, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
@@ -46,13 +45,6 @@ export const DEMO_REPOS: DemoRepo[] = [
     graph: marketplaceGraph as Graph,
     gitUrl: "https://github.com/krishil-agrawal-itp/marketplace-dashboard",
     defaultChange: { node: "field:Deployment.successRate", to: "deploySuccessRate" },
-  },
-  {
-    id: "shopflow",
-    label: "samples/shopflow",
-    description: "Hand-made 7-layer sample from the PRD (SQL, PySpark, API, React).",
-    graph: shopflowGraph,
-    defaultChange: { node: "db:column:orders.cust_id", to: "customer_id" },
   },
 ];
 
@@ -210,6 +202,8 @@ export interface AgentRequest {
   title: string;
   body: string;
   dryRun: boolean;
+  /** Optional stored repo id — passed to the server so it can enrich the PR with graph context. */
+  repoId?: string;
 }
 
 export async function runGithubAgent(input: AgentRequest, onEvent: (e: AgentEvent) => void): Promise<AgentEvent> {

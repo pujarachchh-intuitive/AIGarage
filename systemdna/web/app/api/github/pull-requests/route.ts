@@ -22,5 +22,6 @@ export async function POST(request: Request) {
     title: String(body.title ?? `Rename ${body.field} to ${body.to}`).slice(0, 200),
     body: String(body.body ?? ""),
     dryRun: body.dryRun !== false,
+    repoId: body.repoId ? String(body.repoId).replace(/[^\w-]/g, "").slice(0, 80) : undefined,
   });
 }
