@@ -1,143 +1,359 @@
-# SystemDNA dashboard (web)
+# SystemDNA — Agent City Dashboard
 
-The Agent City dashboard for SystemDNA. It is built with Next.js 16 and follows the HRMS design system (`C:\dev\hrms\DESIGN.md`): zinc first, Geist Sans, the same page shell, tokens, badges, tables and KPI tiles. Colour is used only for state.
+> **Built for the IBM Bob 2.0 Hackathon** · Next.js 16 · TypeScript · IBM Bob Shell
 
-## Run it
+SystemDNA is an AI-powered change-intelligence platform that answers the question engineers dread most: **"If I rename this field, what breaks — and can I fix all of it safely, right now?"**
+
+It builds a precise knowledge graph of your codebase, predicts the ripple of any planned change, and deploys a governed crew of **IBM Bob agents** to fix every affected file — then proves the change is complete with a type check, a Bob Inspector review, and a draft pull request.
+
+---
+
+## Why It Matters
+
+Text search (`grep`) misses files. Type checkers only check what you edited. Docs and config don't import anything. Database migrations live in a separate world.
+
+SystemDNA fuses all of these into one dependency graph and uses **IBM Bob Shell running headless on the server** to act on it. Every agent gets a strict file permit. Out-of-permit edits are automatically reverted. The run is fully observable, wave by wave, on a live city map.
+
+---
+
+## IBM Bob — The Core of SystemDNA
+
+**Bob Shell (`bob run --format json`) powers three agents.** The API key stays on the server: passed only through the Bob process environment, scrubbed from every error message, never logged.
+
+### 1 · Bob Fixer  _(the worker)_
+
+For every change except TypeScript renames, SystemDNA dispatches **one IBM Bob Fixer per affected file**, in dependency-wave order.
+
+Each Fixer receives:
+- The change in plain English ("Rename column `cust_id` to `customer_id` in the `orders` table")
+- Why _this specific file_ is affected (link evidence from the graph)
+- The cumulative diff of every earlier wave (so it never undoes a previous agent's work)
+- Its **permit**: the one file it may edit
+
+Guard rails enforced automatically:
+| Situation | What happens |
+|---|---|
+| Agent edits a file outside its permit | Edit is git-reverted; event shown as **Blocked** |
+| Type check fails after the edit | Agent gets **one retry** with the exact error messages |
+| Still failing after the retry | File is rolled back; event shown as **Quarantined** |
+| Bobcoin budget (`BOB_RUN_MAX_COST`) exhausted | Run stops cleanly; partial progress is preserved |
+
+For a **database change**, the agent on the schema file also writes a new migration (ALTER TABLE / Prisma) with the correct timestamp, following the repo's own migration naming pattern. It never touches an existing migration.
+
+### 2 · Bob Inspector  _(the reviewer)_
+
+After every real run and after every GitHub agent preview, the **IBM Bob Inspector** reads the full staged diff and looks for what the compiler or the Fixers missed: string literals, dynamic property access, JSON, config files, SQL, tests, docs, API payloads.
+
+It returns a verdict (`approved` / `changes_requested`), a one-paragraph summary, and a list of files with line numbers. The verdict appears:
+- In the run trace as an `inspector` event
+- In the GitHub agent panel as a badge
+- In the PR description as `## IBM Bob Inspector review`
+
+Inspector edits are staged first; anything Bob changes is thrown away afterwards — the PR is always exactly the agent's diff.
+
+### 3 · Bob Cartographer  _(the enricher)_
+
+When you connect a repository with **Enrich with IBM Bob** ticked, the Cartographer runs after the TypeScript compiler scan. It finds the links the compiler cannot see:
+
+- `fetch("/api/...")` calls wired to their route handlers
+- String keys, dynamic property access, JSON and config files that reference a field by name
+- Docs, tests and scripts that depend on a field without importing it
+- Shared environment variables and config values
+- **PII flagging**: nodes that hold personal data (names, emails, IDs)
+
+Every proposed link is validated: both ends must be nodes the parser already found, edge type and rule must be known, and parser links win. Accepted links show as _"Found by Bob"_ with medium or low confidence.
+
+### Key safety properties
+
+```
+BOB_API_KEY / BOBSHELL_API_KEY  ──►  bob process env only
+                                     never: CLI arg / file / log / error message
+                                     scrubbed by scrubBob() from every string before it leaves the server
+bob run --format json            ──►  stdin closed (no piped prompt wait)
+                                     stdout capped at 2 MB, stderr at 4 KB
+                                     SIGKILL + taskkill /T /F after BOB_TIMEOUT_MS
+```
+
+**Relevant source files**
+
+| File | Responsibility |
+|---|---|
+| [`lib/server/bob.ts`](lib/server/bob.ts) | Shell client: key handling, CLI discovery, spawn, status cache |
+| [`lib/server/change-agent.ts`](lib/server/change-agent.ts) | Real runs: Compiler strategy, Bob Fixer strategy, type-check loop, Inspector call |
+| [`lib/server/github-agent.ts`](lib/server/github-agent.ts) | Inspector (preview path), push, draft PR |
+| [`lib/server/bob-cartographer.ts`](lib/server/bob-cartographer.ts) | Cartographer: catalog, prompt, link validation, PII flags |
+| [`app/api/bob/status/route.ts`](app/api/bob/status/route.ts) | `GET /api/bob/status` — never returns the key |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js ≥ 20 (tested on 22)
+- `git` on `PATH`
+- IBM Bob Shell CLI (optional — everything else works without it)
+
+### Install
 
 ```bash
-npm install
+# Scanner (TypeScript compiler)
+cd systemdna/core/scanner && npm install
+
+# Web app
+cd systemdna/web && npm install
+```
+
+### Configure
+
+```bash
+cp .env.example .env.local
+```
+
+| Variable | Default | What it does |
+|---|---|---|
+| `BOB_API_KEY` | _empty_ | **IBM Bob Shell API key.** Enables all three Bob agents |
+| `BOB_CLI` | `bob` on PATH | Full path to the Bob Shell CLI executable |
+| `BOB_TIMEOUT_MS` | `240000` | Per-run timeout (ms) |
+| `BOB_MAX_COST` | `3` | Bobcoin cap per individual Bob call |
+| `BOB_MAX_TURNS` | `20` | Max agent turns per call |
+| `BOB_RUN_MAX_COST` | `5` | Total Bobcoin budget for one change run (all Fixers + Inspector) |
+| `GITHUB_TOKEN` | _empty_ | Fine-grained token (Contents + Pull Requests: write) for pushing branches and opening draft PRs |
+| `GITHUB_APP_ID` | _empty_ | GitHub App id (preferred over `GITHUB_TOKEN`) |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | _empty_ | Path to the app's `.pem` file |
+| `SYSTEMDNA_DATA_DIR` | `web/.data` | Where connected repo graphs are stored |
+| `SYSTEMDNA_SCANNER` | `../core/scanner/ts-scan.mjs` | Path to the scanner |
+| `NEXT_PUBLIC_API_URL` | _empty_ | External FastAPI backend (leave empty for built-in APIs) |
+
+### Install IBM Bob Shell
+
+```powershell
+# Windows
+powershell -c "irm -Uri https://bob.ibm.com/download/bobshell.ps1 | iex"
+```
+
+```bash
+# macOS / Linux
+curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash
+```
+
+Verify: `bob --version`. Restart `npm run dev`. The **Settings** page shows "IBM Bob ready" when the key and CLI are both present.
+
+### Run
+
+```bash
+cd systemdna/web
 npm run dev
 ```
 
-Open http://localhost:3000. It starts on the Overview page.
+Open [http://localhost:3000](http://localhost:3000).
 
-## Two data modes
+---
 
-| Mode | When | What happens |
-| --- | --- | --- |
-| Demo | `NEXT_PUBLIC_API_URL` is not set | Uses a demo graph (see "Demo repos" below). The impact engine runs in the browser (`lib/impact.ts`). Agent runs are simulated (`lib/simulator.ts`) and clearly labelled "Simulated". |
-| Live | `NEXT_PUBLIC_API_URL` is set in `.env.local` | Reads `GET /graph`, creates changes with `POST /changes`, starts them with `POST /changes/{id}/run`, approves with `POST /changes/{id}/approve`, and listens to `WS /ws` for events. |
+## Walkthrough
 
-Example `.env.local` for live mode:
+### Step 1 — Explore the graph
 
-```bash
-NEXT_PUBLIC_API_URL=https://api.example.com
-NEXT_PUBLIC_DEMO_TOKEN=change-me
+The `marketplace-dashboard` demo is loaded by default. Open **Agent City** to see the dependency graph as:
+- **Dependency map** — districts (layers) connected by typed edges
+- **3D city** — one building per file, height = lines of code, arcs = imports
+- **Force graph** — Obsidian-style network, sized by link count, searchable
+
+### Step 2 — Plan a change
+
+Go to **New change**. Pick `Deployment.successRate`, rename it to `deploySuccessRate`. Click **Analyse impact**.
+
+You see:
+- 6 files in 2 waves
+- Severity per component (breaking / needs_update / safe)
+- Business process impact
+- Grep comparison: 2 files grep would flag that use a _different_ `successRate` on a different type
+
+### Step 3 — Run it for real
+
+Click **Approve plan and run**. `lib/types.ts` is in a protected district and waits for your **Approve** click. Then:
+
+1. A fresh `git clone` of the repo (never your working copy)
+2. The TypeScript compiler's own rename (ts-rename.mjs) — one pass, no guessing
+3. Type check: no new errors
+4. The IBM Bob Inspector reviews the diff (~2 min, ~0.2 Bobcoins)
+5. The run page shows every agent on the city map, wave by wave
+
+Try a change the compiler cannot do: **Change type** of `Deployment.successRate` to `number | null`. IBM Bob Fixer agents take over — one per file, wave by wave (~7 min, ~1 Bobcoin).
+
+### Step 4 — Open a pull request
+
+The **GitHub agent** panel shows the full diff and Bob's Inspector verdict. Click **Preview changes** (dry run, no push). Then **Open draft pull request** to push exactly that diff to a new branch `systemdna/<change>` and open a draft PR with the impact report and Bob's review in the description.
+
+### Step 5 — Connect your own repo
+
+**Repositories → Connect repository** → paste a public Git URL or upload a `.zip` (≤ 50 MB). Tick **Enrich with IBM Bob** to run the Cartographer after the scan.
+
+---
+
+## Architecture
+
+```
+Browser                          Next.js server
+  │                                    │
+  ├─ GET /api/bob/status ──────────────► bobStatus()   (key present? CLI found? version?)
+  │                                    │
+  ├─ POST /api/repos { bob:true } ─────► ingest.ts → scan → bob-cartographer.ts
+  │                                    │              └─► runBob()  [Cartographer]
+  │                                    │
+  ├─ POST /api/changes/run ────────────► change-agent.ts
+  │   streams RunEvents (NDJSON)       │   ├─ compiler strategy: ts-rename.mjs
+  │                                    │   └─ bob strategy: runBob() × N  [Fixers]
+  │                                    │                  + inspectWithBob()  [Inspector]
+  │                                    │
+  └─ POST /api/github/pull-requests ──► github-agent.ts
+      streams AgentEvents (NDJSON)     │   └─ inspectWithBob()  [Inspector, preview only]
+                                       │
+                                    bob CLI process
+                                    (BOB_API_KEY in env, stdin closed)
 ```
 
-## Connect your own repository
+### Data flow for a change run
 
-Open **Repositories**, then **Connect repository** (or pick "+ Connect a repository…" in the top-bar switch).
-
-| Source | How |
-| --- | --- |
-| Git URL | A public `https://` URL on GitHub, GitLab or Bitbucket, plus an optional branch |
-| Upload | A `.zip` of the repo, up to 50 MB (GitHub: Code, then Download ZIP) |
-
-What happens (the page shows each step live):
-
-1. **Get the code.** `git clone --depth 1` (no shell, 2-minute limit, no prompts) or unzip (paths that escape the folder are refused).
-2. **Check size.** Up to 40,000 files and 300 MB.
-3. **Scan.** `core/scanner/ts-scan.mjs --progress` runs in its own process (4-minute limit). It only reads files: no install, no build, no scripts.
-4. **Save.** The graph goes to `web/.data/repos/<id>/graph.json` with an entry in `index.json` (git-ignored).
-5. **Clean up.** The temp copy of the code is always deleted.
-
-| Method and path | Does |
-| --- | --- |
-| `GET /api/repos` | List connected repos |
-| `POST /api/repos` | Connect: JSON `{ url, ref? }` or a multipart form with `file`. Streams progress as newline-delimited JSON |
-| `GET /api/repos/{id}` | The graph and its entry |
-| `POST /api/repos/{id}/rescan` | Pull the latest code and rebuild (git repos) |
-| `DELETE /api/repos/{id}` | Remove the repo and its graph |
-
-## Real change runs and pull requests
-
-For a repo on github.com, the change page runs the change for real (`lib/server/change-agent.ts`); samples without code (ShopFlow) keep the simulator.
-
-1. **Approval**: files in protected districts (Database, Types) or with personal data wait for **Approve**.
-2. **Run** in a fresh clone, wave by wave:
-   - Renames of TypeScript symbols: the TypeScript compiler (`core/scanner/ts-rename.mjs`), one pass, reported per file.
-   - Everything else (type change, signature, delete, free text, database changes): one **IBM Bob Fixer** per file with a permit for that file only (plus new migrations for the schema file). Out-of-permit edits are reverted (*Blocked*); each edit is type-checked (`core/scanner/ts-check.mjs`), retried once with the errors, then rolled back if still failing (*Quarantined*). Budget: `BOB_RUN_MAX_COST` Bobcoins.
-3. **Verify**: type check of every touched file, then the IBM Bob Inspector reviews the diff.
-4. **Pull request** panel: the diff, the review and any remaining type errors. **Open draft pull request** (after you confirm) applies the stored diff to a fresh clone, pushes a new branch `systemdna/<change>` and opens a draft PR. The default branch is never touched, and no agent runs twice.
-
-| Method and path | Does |
-| --- | --- |
-| `POST /api/changes/run` | `ChangeRunRequest`. Streams `ChangeStreamLine`: run events, status, the Bob review, the diff with a `patchId` |
-| `POST /api/changes/pull-request` | `{ patchId, title, body }`. Streams progress, then the PR |
-| `GET /api/github/status` | GitHub App, token or nothing; with `?repo=<url>`, whether the app is installed there. Never returns a secret |
-| `GET /api/github/install/callback` | Where GitHub sends users after they install the app; redirects to Repositories |
-| `POST /api/github/pull-requests` | The original field-rename agent: `{ url, field, to, changeId, title, body, dryRun }` |
-
-Opening PRs signs in as a **GitHub App** (preferred): set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and `GITHUB_APP_PRIVATE_KEY_PATH`, then install the app on the repo from the Repositories page. The agent gets a 1-hour token for that one repo, and PRs show up as `<slug>[bot]`. A personal `GITHUB_TOKEN` (a fine-grained token with Contents and Pull requests write access) works as a fallback. Full steps: `../STATUS.md`, section 4.
-
-## Settings
-
-Copy `.env.example` to `.env.local`.
-
-| Variable | Default | Use |
-| --- | --- | --- |
-| `NEXT_PUBLIC_API_URL` | empty | FastAPI backend (live mode) |
-| `SYSTEMDNA_DATA_DIR` | `web/.data` | Where graphs are stored |
-| `SYSTEMDNA_SCANNER` | `../core/scanner/ts-scan.mjs` | Scanner path (run `npm install` there once) |
-| `GITHUB_APP_ID` | empty | GitHub App id. When set, the agent uses the app instead of `GITHUB_TOKEN` |
-| `GITHUB_APP_SLUG` | empty | The app's URL name (`github.com/apps/<slug>`), for the install link |
-| `GITHUB_APP_PRIVATE_KEY_PATH` | empty | Path to the app's `.pem` file. Keep it outside the repo |
-| `GITHUB_APP_PRIVATE_KEY` | empty | The key inline instead of a file (`\n` for new lines). Handy on AWS |
-| `GITHUB_TOKEN` | empty | Fallback: a personal token for pushing branches and opening draft PRs |
-| `BOB_API_KEY` | empty | IBM Bob Shell key: turns on the Bob Inspector (reviews GitHub agent diffs) and Bob Cartographer (enriches connected repos). Needs the `bob` CLI |
-| `BOB_CLI` | `bob` on `PATH` | Path to the Bob Shell CLI |
-| `BOB_TIMEOUT_MS`, `BOB_MAX_COST`, `BOB_MAX_TURNS` | 240000, 3, 20 | Limits per Bob run |
-
-The server also needs `git` installed.
-
-## Demo repos
-
-Pick one with the Repository switch in the top bar.
-
-| Repo | Where the graph comes from | Demo change |
-| --- | --- | --- |
-| `marketplace-dashboard` (default) | Real. Built by `core/scanner/ts-scan.mjs` from [krishil-agrawal-itp/marketplace-dashboard](https://github.com/krishil-agrawal-itp/marketplace-dashboard), cloned in `samples/marketplace-dashboard`. Saved as `lib/mock/marketplace-dashboard.graph.json` | Rename `Deployment.successRate` to `deploySuccessRate`: 6 files in 2 waves. Grep flags 2 extra files that use a different `ProductRow.successRate` |
-
-To re-scan the sample repo after it changes (run `npm install` in `../core/scanner` once first):
-
-```bash
-npm run scan:sample
 ```
+ImpactReport (browser) ──► POST /api/changes/run
+                              │
+                    ┌─────────┴──────────────────────────┐
+                    │  1. git clone --depth 1             │
+                    │  2. baseline type errors            │
+                    │  3. fix (compiler or Bob Fixers)    │
+                    │     emit: wave_started              │
+                    │           agent_started             │
+                    │           tool_call (write/read)    │
+                    │           check_passed / failed     │
+                    │           blocked / quarantined     │
+                    │           done                      │
+                    │  4. Bob Inspector                   │
+                    │     emit: inspector + review        │
+                    │  5. git diff → save patch           │
+                    │     emit: rescan + change_completed │
+                    └────────────────────────────────────┘
+                              │
+                    stored patchId ──► POST /api/changes/pull-request
+                                          └─ fresh clone → apply patch → push → draft PR
+```
+
+---
 
 ## Pages
 
 | Route | What it shows |
-| --- | --- |
-| `/overview` | KPIs, components per district, how links were found, recent changes, agent activity |
+|---|---|
+| `/overview` | KPIs, components per district, how links were found (parser vs Bob), recent changes, agent activity |
 | `/repos` | Connected repositories and samples; `/repos/new` connects a new one |
-| `/city` | The Agent City. Three views: **Dependency map** (the knowledge graph as districts and roads) and **3D city** (`?view=3d`: one building per file, height = lines of code on a log scale, plates = top-level folders, arcs = imports, caps = entry point, core modules and hotspots) and **Graph** (`?view=graph`: an Obsidian-style force graph of every node, sized by link count, with search, filters, display and force settings) |
-| | Agent City toolbar: **Full screen** (whole view with its panels; falls back to filling the window where the browser blocks full screen), **Image** (PNG of the current view), **Preferences** (saved in the browser: start view, map legend, 3D height by lines or imports, colour, arcs, labels, auto-rotate, graph local depth), **Keyboard shortcuts** (`1` `2` `3` views, `F` full screen, `Esc` clear, `?` help). The selection carries across all three views |
-| `/changes/new` | Pick a column or field, give it a new name, see the ripple, the fix plan, business impact and the grep comparison |
-| `/changes/[id]` | The live run: approval gate, agents on the map, trace, agents table, governance, graph diff, report download |
+| `/city` | **Dependency map**, **3D city** and **Force graph** with full-screen, PNG export, keyboard shortcuts |
+| `/changes/new` | Pick a node, choose a change kind, see the ripple, fix plan, business impact and grep comparison |
+| `/changes/[id]` | Live run: approval gate, agents on the city map, trace, agents table, governance, graph diff, report download |
 | `/changes` | All changes |
-| `/governance` | City laws and the audit log |
-| `/settings` | Connection and local data |
+| `/governance` | City laws and audit log |
+| `/settings` | IBM Bob status, GitHub status, connection info |
 
-## Contracts the backend must follow
+---
 
-The types live in `lib/types.ts`. They match the PRD:
+## Change Kinds
 
-- `Graph` = `graph.json` (PRD section 7). Edges point downstream: `to` depends on `from`. Each graph brings its own `layers` (districts). The ids `business` (read-only) and `quality` (tests and docs row) have fixed meaning.
-- `ImpactReport` (PRD section 8). `fixUnits` has one entry per file, so one agent owns one file.
-- `RunEvent` (PRD section 13). The dashboard understands these `event` values: `impact_ready`, `awaiting_approval`, `approved`, `wave_started`, `agent_started`, `tool_call`, `blocked`, `check_passed`, `check_failed`, `retrying`, `done`, `quarantined`, `wave_completed`, `rescan` (`data.before`, `data.after`), `inspector` (`data.verdict`, `data.issues`), `pr_created` (`data.branch`), `change_completed`.
-- `node` on an event is the fix unit id, which is the file path.
+| Kind | Node types | Strategy |
+|---|---|---|
+| **Rename** | TSField, TSType, Function, Constant, Component, Column, Table | TypeScript compiler (TS symbols) · IBM Bob Fixers (DB and everything else) |
+| **Change type** | Fields, Columns, Constants | IBM Bob Fixers |
+| **Signature** | Functions | IBM Bob Fixers |
+| **Delete** | Anything | IBM Bob Fixers |
+| **Custom** (plain text) | Anything | IBM Bob Fixers |
 
-`lib/run-state.ts` turns the event list into what the screens show. Demo and live mode use the same code path.
+---
 
-## Folder map
+## API Reference
 
-```text
-app/(app)/            pages inside the app shell
-components/layout/    sidebar, navbar, app chrome
-components/ui/        badge, status badge, table, KPI tile, page shell, empty state, toaster
-components/city/      city map (Cytoscape), legend, node panel
-components/changes/   impact report parts, run panels
-lib/                  types, impact engine, run state, simulator, API client, store, theme, report
-lib/mock/             marketplace-dashboard demo graph
+| Method · Path | What it does |
+|---|---|
+| `GET /api/bob/status` | Bob ready? Key set? CLI version? **Never returns the key** |
+| `GET /api/repos` | List connected repos |
+| `POST /api/repos` | Connect a repo (`{ url, ref?, bob? }` JSON or `.zip` form). Streams progress (NDJSON) |
+| `POST /api/repos/{id}/rescan` | Re-clone and rebuild the graph |
+| `DELETE /api/repos/{id}` | Remove the repo |
+| `GET /api/github/status` | GitHub App or token status; `?repo=<url>` checks installation |
+| `POST /api/changes/run` | Run a planned change. Streams `RunEvent`s + `BobReview` + diff (`ChangeStreamLine` NDJSON) |
+| `POST /api/changes/pull-request` | `{ patchId, title, body }` — open a draft PR from a stored diff |
+| `POST /api/github/pull-requests` | Legacy field-rename agent (`dryRun` + PR). Streams `AgentEvent` NDJSON |
+| `GET /api/github/install/callback` | GitHub App OAuth callback |
+
+---
+
+## Type Contracts
+
+The types in [`lib/types.ts`](lib/types.ts) are the single source of truth shared between the browser and the server:
+
+- **`Graph`** — nodes (TSField, TSType, Column, Table, Component, …) + edges (typed, directional, with `source: "parser" | "bob"`, confidence and rule)
+- **`ImpactReport`** — items (severity, risk, depth), fixUnits (one per file), waves, business impact, grep comparison
+- **`RunEvent`** — the event stream the run page consumes: `wave_started`, `agent_started`, `tool_call`, `check_passed/failed`, `blocked`, `quarantined`, `inspector`, `rescan`, `change_completed`
+- **`ChangeStreamLine`** — wraps `RunEvent` plus status lines, `BobReview`, diff preview and errors
+- **`BobReview`** — `verdict`, `summary`, `issues[]`, `bobcoins`, `durationMs`
+- **`BobStatus`** — `configured`, `cli`, `version`, `ready`, `reason` (no key, ever)
+
+---
+
+## Folder Map
+
 ```
+app/(app)/            Pages: overview, repos, city, changes, governance, settings
+app/api/              Route handlers
+  bob/status/           GET /api/bob/status
+  changes/run/          POST /api/changes/run  (Compiler + Bob Fixers + Inspector)
+  changes/pull-request/ POST /api/changes/pull-request
+  github/               status, pull-requests, install callback
+  repos/                CRUD + rescan
+components/layout/    Sidebar, navbar, app chrome
+components/city/      City map (Cytoscape), 3D city (Three.js), force graph (D3), legend, node panel
+components/changes/   Impact report, run panels, GitHub agent panel (Bob review UI)
+lib/                  types, impact engine, run-state, simulator, API client, store, report
+lib/server/
+  bob.ts              Shell client: key, CLI, spawn, scrub, status
+  change-agent.ts     Real runs: Compiler strategy, Bob Fixer strategy, type-check loop
+  github-agent.ts     Inspector (preview), push, draft PR
+  bob-cartographer.ts Cartographer: catalog, prompt, link validation, PII
+  github-auth.ts      GitHub App JWT + install tokens; personal token fallback
+  ingest.ts           git clone / zip unpack → scan → save
+lib/mock/             marketplace-dashboard demo graph (real scan)
+```
+
+---
+
+## Demo Repos
+
+| Repo | Graph source | Suggested change |
+|---|---|---|
+| `marketplace-dashboard` (default) | Real scan of [krishil-agrawal-itp/marketplace-dashboard](https://github.com/krishil-agrawal-itp/marketplace-dashboard) | Rename `Deployment.successRate` → `deploySuccessRate`: 6 files, 2 waves |
+
+To re-scan the sample:
+
+```bash
+# Run once: npm install in ../core/scanner
+npm run scan:sample
+```
+
+---
+
+## Development Notes
+
+```bash
+# TypeScript check
+node node_modules/typescript/bin/tsc --noEmit
+
+# ESLint
+node node_modules/eslint/bin/eslint.js .
+
+# The app serves both demo and live mode from the same binary.
+# Demo: NEXT_PUBLIC_API_URL not set — uses built-in graph, impact engine in browser, simulator.
+# Live: NEXT_PUBLIC_API_URL set — reads from FastAPI backend, WebSocket event feed.
+```
+
+The `lib/run-state.ts` `deriveRun()` function processes the same `RunEvent` list in both modes. The simulator (`lib/simulator.ts`) produces the same sequence real runs produce, so the UI was built and tested before the backend existed.
+
+---
+
+*SystemDNA · IBM Bob 2.0 Hackathon submission · lablab.ai · September 2026*
