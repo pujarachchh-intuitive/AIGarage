@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "systemdna-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "systemdna/web", "run", "dev", "--", "--port", "3100"],
+      "port": 3100
+    }
+  ]
+}
