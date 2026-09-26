@@ -166,7 +166,7 @@ export function ConnectRepoClient() {
                 <label className="flex flex-col gap-1.5">
                   <span className="type-label">Branch (optional)</span>
                   <div className="relative">
-                    <GitBranch className="size-4 text-zinc-400 absolute left-3 top-3" />
+                    <GitBranch className="size-4 text-icon-secondary absolute left-3 top-3" />
                     <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Default branch" className={cn(inputClass, "pl-9")} disabled={phase === "running"} />
                   </div>
                 </label>
@@ -186,7 +186,7 @@ export function ConnectRepoClient() {
                 onClick={() => fileInput.current?.click()}
                 className={cn(
                   "cursor-pointer flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-xl border border-dashed text-center transition-colors",
-                  dragging ? "border-border-strong bg-surface-hover" : "border-border bg-zinc-50/50 hover:bg-surface-hover",
+                  dragging ? "border-border-strong bg-surface-hover" : "border-border bg-surface-secondary hover:bg-surface-hover",
                 )}
               >
                 <Upload className="size-5 text-icon-secondary" />
@@ -215,7 +215,7 @@ export function ConnectRepoClient() {
             <label className={cn("flex items-start gap-2.5", bobStatus?.ready ? "cursor-pointer" : "opacity-60")}>
               <input
                 type="checkbox"
-                className="mt-0.5 size-4 accent-zinc-900"
+                className="mt-0.5 size-4 accent-brand"
                 checked={useBob}
                 disabled={!bobStatus?.ready || phase === "running"}
                 onChange={(e) => setUseBob(e.target.checked)}
@@ -263,9 +263,9 @@ export function ConnectRepoClient() {
                     <span
                       className={cn(
                         "size-6 rounded-full flex items-center justify-center border text-caption font-semibold shrink-0",
-                        state === "done" && "bg-zinc-900 border-transparent text-white",
+                        state === "done" && "bg-brand border-transparent text-brand-ink",
                         state === "active" && "border-border-strong text-text-primary",
-                        state === "failed" && "bg-red-50 border-red-200/50 text-red-700",
+                        state === "failed" && "bg-error-soft border-error/25 text-error",
                         state === "todo" && "border-border text-text-tertiary",
                       )}
                     >
@@ -283,7 +283,7 @@ export function ConnectRepoClient() {
           </ol>
 
           {error ? (
-            <div className="mt-2 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50 text-body text-red-700">{error}</div>
+            <div className="mt-2 px-4 py-3 rounded-xl border border-error/25 bg-error-soft text-body text-error">{error}</div>
           ) : null}
 
           {repo ? (
@@ -313,7 +313,7 @@ export function ConnectRepoClient() {
               <div className="flex flex-wrap gap-3">
                 <button className={primaryButton} onClick={() => open("/city?view=3d")}>
                   <MapIcon />
-                  Open Agent City
+                  Open Atlas
                 </button>
                 <button className={secondaryButton} onClick={() => open("/city?view=graph")}>
                   Graph view

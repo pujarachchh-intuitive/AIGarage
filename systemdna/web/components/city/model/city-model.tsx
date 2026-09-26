@@ -647,7 +647,7 @@ export function CityModel({
 }
 
 /** Hover card: what the building is, and how healthy. */
-function ModelCard({ file, layer, bobLinks }: { file: CityFile; layer?: { label: string; accent: string }; bobLinks: number }) {
+export function ModelCard({ file, layer, bobLinks }: { file: CityFile; layer?: { label: string; accent: string }; bobLinks: number }) {
   const tested = file.components - file.untested;
   return (
     <div className="model-card">

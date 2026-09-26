@@ -1,15 +1,15 @@
-import type { Metadata } from "next";
-import { LandingPage } from "@/components/landing/landing-page";
-import { getLandingData } from "@/lib/landing-data";
+import "./landing/landing.css";
+import { LandingPage } from "./landing/LandingPage";
+import { landingMetadata } from "./landing/meta";
 
-export const metadata: Metadata = {
-  title: { absolute: "SystemDNA: see what a change will break, then fix it safely" },
-  description:
-    "SystemDNA maps every file, type and field in your code, shows exactly what a change will break, and lets governed agents fix it and open a draft pull request.",
-};
+export const metadata = landingMetadata;
 
-// The landing page. The numbers are worked out on the server from the sample repo,
-// so the browser only downloads a small summary.
+// The landing page: a scroll story over the live 3D model of the demo repo.
+// The earlier product tour lives at /tour.
 export default function Home() {
-  return <LandingPage data={getLandingData()} />;
+  return (
+    <div className="landing-root">
+      <LandingPage />
+    </div>
+  );
 }

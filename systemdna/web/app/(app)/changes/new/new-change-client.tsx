@@ -62,7 +62,7 @@ function AnalysisSteps({ graph, field }: { graph: Graph; field: string }) {
               {state === "done" ? (
                 <Check className="size-4 text-success animate-in zoom-in duration-200" />
               ) : state === "active" ? (
-                <Loader2 className="size-4 text-info animate-spin" />
+                <Loader2 className="size-4 text-brand-text animate-spin" />
               ) : (
                 <span className="size-1.5 rounded-full bg-border-strong" />
               )}

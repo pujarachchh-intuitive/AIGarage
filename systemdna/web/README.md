@@ -1,6 +1,6 @@
 # SystemDNA dashboard (web)
 
-The Agent City dashboard for SystemDNA. It is built with Next.js 16 and follows the HRMS design system (`C:\dev\hrms\DESIGN.md`): zinc first, Geist Sans, the same page shell, tokens, badges, tables and KPI tiles. Colour is used only for state.
+The Atlas dashboard for SystemDNA. It is built with Next.js 16 and follows the HRMS design system (`C:\dev\hrms\DESIGN.md`): zinc first, Geist Sans, the same page shell, tokens, badges, tables and KPI tiles. Colour is used only for state.
 
 ## Run it
 
@@ -112,8 +112,8 @@ npm run scan:sample
 | --- | --- |
 | `/overview` | KPIs, components per district, how links were found, recent changes, agent activity |
 | `/repos` | Connected repositories and samples; `/repos/new` connects a new one |
-| `/city` | The Agent City. Three views: **Dependency map** (the knowledge graph as districts and roads) and **3D city** (`?view=3d`: one building per file, height = lines of code on a log scale, plates = top-level folders, arcs = imports, caps = entry point, core modules and hotspots) and **Graph** (`?view=graph`: an Obsidian-style force graph of every node, sized by link count, with search, filters, display and force settings) |
-| | Agent City toolbar: **Full screen** (whole view with its panels; falls back to filling the window where the browser blocks full screen), **Image** (PNG of the current view), **Preferences** (saved in the browser: start view, map legend, 3D height by lines or imports, colour, arcs, labels, auto-rotate, graph local depth), **Keyboard shortcuts** (`1` `2` `3` views, `F` full screen, `Esc` clear, `?` help). The selection carries across all three views |
+| `/city` | The Atlas. Three views: **Dependency map** (the knowledge graph as districts and roads) and **3D city** (`?view=3d`: one building per file, height = lines of code on a log scale, plates = top-level folders, arcs = imports, caps = entry point, core modules and hotspots) and **Graph** (`?view=graph`: an Obsidian-style force graph of every node, sized by link count, with search, filters, display and force settings) |
+| | Atlas toolbar: **Full screen** (whole view with its panels; falls back to filling the window where the browser blocks full screen), **Image** (PNG of the current view), **Preferences** (saved in the browser: start view, map legend, 3D height by lines or imports, colour, arcs, labels, auto-rotate, graph local depth), **Keyboard shortcuts** (`1` `2` `3` views, `F` full screen, `Esc` clear, `?` help). The selection carries across all three views |
 | `/changes/new` | Pick a column or field, give it a new name, see the ripple, the fix plan, business impact and the grep comparison |
 | `/changes/[id]` | The live run: approval gate, agents on the map, trace, agents table, governance, graph diff, report download |
 | `/changes` | All changes |

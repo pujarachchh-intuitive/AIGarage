@@ -35,9 +35,9 @@ const STRATEGY_LABEL: Record<RunStrategy, string> = {
 function RealRunBanner({ run, interrupted, running }: { run: ChangeRunResult | undefined; interrupted: boolean; running: boolean }) {
   if (interrupted) {
     return (
-      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
-        <AlertTriangle className="size-4 text-amber-700 mt-0.5 shrink-0" />
-        <p className="text-body text-amber-700">
+      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-warning/25 bg-warning-soft">
+        <AlertTriangle className="size-4 text-warning mt-0.5 shrink-0" />
+        <p className="text-body text-warning">
           <span className="font-semibold">This run was interrupted</span> (the page was reloaded or closed while it ran). Use Run again to start it on a fresh clone.
         </p>
       </div>
@@ -45,16 +45,16 @@ function RealRunBanner({ run, interrupted, running }: { run: ChangeRunResult | u
   }
   if (run?.status === "failed" || (run?.error && run.status !== "running")) {
     return (
-      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50">
-        <AlertTriangle className="size-4 text-red-700 mt-0.5 shrink-0" />
-        <p className="text-body text-red-700">
+      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-error/25 bg-error-soft">
+        <AlertTriangle className="size-4 text-error mt-0.5 shrink-0" />
+        <p className="text-body text-error">
           <span className="font-semibold">{run.status === "failed" ? "The run did not finish." : "The run stopped early."}</span> {run.error}
         </p>
       </div>
     );
   }
   return (
-    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-zinc-50/50">
+    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-surface-secondary">
       {running ? <Loader2 className="size-4 text-icon-secondary mt-0.5 shrink-0 animate-spin" /> : <Info className="size-4 text-icon-secondary mt-0.5 shrink-0" />}
       <p className="text-body text-text-secondary">
         <span className="font-semibold text-text-primary">Real run.</span>{" "}
@@ -188,7 +188,7 @@ export function RunClient({ id }: { id: string }) {
   if (!hydrated || !graph || wrongRepo) {
     return (
       <PageShell>
-        <div className="h-[600px] rounded-xl bg-zinc-50 animate-pulse" />
+        <div className="h-[600px] rounded-xl bg-surface-secondary animate-pulse" />
       </PageShell>
     );
   }
@@ -284,7 +284,7 @@ export function RunClient({ id }: { id: string }) {
       />
 
       {change.mode === "demo" && !isRealRun ? (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-zinc-50/50">
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-surface-secondary">
           <Info className="size-4 text-icon-secondary mt-0.5 shrink-0" />
           <p className="text-body text-text-secondary">
             <span className="font-semibold text-text-primary">Simulated run.</span> No backend is connected, so these
@@ -299,12 +299,12 @@ export function RunClient({ id }: { id: string }) {
       <GithubAgentPanel change={change} graph={graph} reportMarkdown={() => buildReport(change, graph, view)} />
 
       {view.pendingApprovals.length > 0 ? (
-        <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-amber-200/50 bg-amber-50">
+        <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-warning/25 bg-warning-soft">
           <div className="flex flex-col gap-1 min-w-0">
-            <span className="text-body font-semibold text-amber-700">
+            <span className="text-body font-semibold text-warning">
               {view.pendingApprovals.length} {view.pendingApprovals.length === 1 ? "file needs" : "files need"} your approval before agents start
             </span>
-            <span className="type-caption text-amber-700">
+            <span className="type-caption text-warning">
               {view.pendingApprovals.map((p) => `${p.file} (${p.reason})`).join(" · ")}
             </span>
           </div>

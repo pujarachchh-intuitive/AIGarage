@@ -1,6 +1,6 @@
 "use client";
 
-// Agent City preferences, saved in this browser (localStorage).
+// Atlas preferences, saved in this browser (localStorage).
 // Each view reads its own slice. Reset puts everything back to the defaults.
 
 import { create } from "zustand";
@@ -26,7 +26,7 @@ export interface GraphPrefs {
 }
 
 export interface CityPrefs {
-  /** Which view opens when you visit Agent City without choosing one. */
+  /** Which view opens when you visit Atlas without choosing one. */
   startView: CityView | "last";
   lastView: CityView;
   map: { showLegend: boolean };

@@ -72,7 +72,7 @@ export function OverviewClient() {
           <>
             <SecondaryLink href="/city">
               <MapIcon />
-              Open Agent City
+              Open Atlas
             </SecondaryLink>
             <PrimaryLink href="/changes/new">
               <GitBranch />

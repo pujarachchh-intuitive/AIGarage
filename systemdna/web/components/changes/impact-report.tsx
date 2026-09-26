@@ -67,8 +67,8 @@ export function AffectedTable({ report, graph }: { report: ImpactReport; graph: 
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
-                    <div className="w-16 h-1.5 rounded-full bg-zinc-100 overflow-hidden">
-                      <div className="h-full bg-zinc-950 rounded-full" style={{ width: `${item.risk}%` }} />
+                    <div className="w-16 h-1.5 rounded-full bg-surface-secondary overflow-hidden">
+                      <div className="h-full bg-text-primary rounded-full" style={{ width: `${item.risk}%` }} />
                     </div>
                     <span className="type-caption text-text-secondary">{item.risk}</span>
                   </div>
@@ -154,7 +154,7 @@ export function WavesCard({ report }: { report: ImpactReport }) {
           return (
             <div key={w} className="flex gap-3">
               <div className="flex flex-col items-center">
-                <span className="size-6 rounded-full bg-zinc-900 text-white text-caption font-semibold flex items-center justify-center">{w}</span>
+                <span className="size-6 rounded-full bg-text-primary text-surface text-caption font-semibold flex items-center justify-center">{w}</span>
                 {w < report.waveCount ? <span className="w-px flex-1 bg-border mt-1" /> : null}
               </div>
               <div className="flex flex-col gap-1.5 pb-1 min-w-0 flex-1">

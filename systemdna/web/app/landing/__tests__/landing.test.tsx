@@ -85,9 +85,9 @@ describe("LandingPage", () => {
     expect(matches[0]).toBeInTheDocument();
   });
 
-  it('"Enter Agent City" links to /city', () => {
+  it('"Enter the Atlas" links to /city', () => {
     render(React.createElement(LandingPage));
-    const link = screen.getByRole("link", { name: /Enter Agent City/i });
+    const link = screen.getByRole("link", { name: /Enter the Atlas/i });
     expect(link).toHaveAttribute("href", "/city");
   });
 

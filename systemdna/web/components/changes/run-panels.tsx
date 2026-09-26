@@ -71,7 +71,7 @@ function describe(ev: RunEvent): { text: string; tone: "neutral" | "info" | "war
 }
 
 const DOT: Record<string, string> = {
-  neutral: "bg-zinc-400",
+  neutral: "bg-icon-secondary",
   info: "bg-info",
   warning: "bg-warning",
   error: "bg-error",

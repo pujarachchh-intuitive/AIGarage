@@ -32,7 +32,7 @@ function ReviewView({ review }: { review: BobReview }) {
   }
   const approved = review.verdict === "approved";
   return (
-    <div className={cn("flex flex-col gap-2 px-4 py-3 rounded-xl border", approved ? "border-border" : "border-amber-200/50 bg-amber-50")}>
+    <div className={cn("flex flex-col gap-2 px-4 py-3 rounded-xl border", approved ? "border-border" : "border-warning/25 bg-warning-soft")}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-body font-semibold text-text-primary">IBM Bob Inspector</span>
         <Badge variant={approved ? "success" : "warning"}>{approved ? "Approved" : "Changes requested"}</Badge>
@@ -62,15 +62,15 @@ function DiffView({ diff }: { diff: string }) {
     <div className="flex flex-col gap-2">
       {files.map((f, i) => (
         <details key={f.name} open={i < 2} className="border border-border rounded-lg overflow-hidden">
-          <summary className="cursor-pointer px-3 py-2 bg-zinc-50/80 text-body font-semibold text-text-primary">{f.name}</summary>
+          <summary className="cursor-pointer px-3 py-2 bg-surface-secondary text-body font-semibold text-text-primary">{f.name}</summary>
           <pre className="text-caption leading-5 overflow-x-auto scroll-thin p-3 font-mono">
             {f.text.split("\n").map((line, j) => (
               <div
                 key={j}
                 className={cn(
                   "whitespace-pre",
-                  line.startsWith("+") && !line.startsWith("+++") && "bg-emerald-50 text-emerald-700",
-                  line.startsWith("-") && !line.startsWith("---") && "bg-red-50 text-red-700",
+                  line.startsWith("+") && !line.startsWith("+++") && "bg-success-soft text-success",
+                  line.startsWith("-") && !line.startsWith("---") && "bg-error-soft text-error",
                   line.startsWith("@@") && "text-text-tertiary",
                 )}
               >
@@ -175,7 +175,7 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
         </button>
       </div>
       {needsInstall && status?.app ? (
-        <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-border bg-zinc-50/80">
+        <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-border bg-surface-secondary">
           <span className="text-body text-text-secondary">
             The <span className="font-semibold text-text-primary">{status.app.name}</span> app is not installed on this repo yet. Install it, pick this repo, then come back here.
           </span>
@@ -193,10 +193,10 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
         <p className="type-caption text-error">{status.error}</p>
       ) : null}
       {confirming ? (
-        <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
+        <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-xl border border-warning/25 bg-warning-soft">
           <div className="flex flex-col gap-1">
-            <span className="text-body font-semibold text-amber-700">Push a new branch and open a draft PR on {repoLabel}?</span>
-            <span className="type-caption text-amber-700">
+            <span className="text-body font-semibold text-warning">Push a new branch and open a draft PR on {repoLabel}?</span>
+            <span className="type-caption text-warning">
               {run.files.length} files change, exactly as shown below. Nothing is merged; the default branch is not touched.
             </span>
           </div>
@@ -214,10 +214,10 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
       ) : null}
       {run.review ? <ReviewView review={run.review} /> : null}
       {run.remainingErrors?.length ? (
-        <div className="flex flex-col gap-1 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
-          <span className="text-body font-semibold text-amber-700">New type errors left after the run</span>
+        <div className="flex flex-col gap-1 px-4 py-3 rounded-xl border border-warning/25 bg-warning-soft">
+          <span className="text-body font-semibold text-warning">New type errors left after the run</span>
           {run.remainingErrors.slice(0, 8).map((e, i) => (
-            <span key={i} className="type-caption text-amber-700">
+            <span key={i} className="type-caption text-warning">
               {e.file}:{e.line} {e.message}
             </span>
           ))}
@@ -268,7 +268,7 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
           </ol>
         ) : null}
         {error ? (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50 text-body font-semibold text-red-700">
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-error/25 bg-error-soft text-body font-semibold text-error">
             <AlertTriangle className="size-4" />
             {error}
           </div>

@@ -57,7 +57,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, href: "/overview" },
   { label: "Repositories", icon: FolderGit2, href: "/repos" },
-  { label: "Agent City", icon: MapIcon, href: "/city" },
+  { label: "Atlas", icon: MapIcon, href: "/city" },
   {
     label: "Changes",
     icon: GitBranch,

@@ -16,17 +16,16 @@ const LANDMARK_INFO = {
   hotspot: { label: "Hotspot", body: "Unusually large. Often where complexity hides.", swatch: "bg-warning" },
 } as const;
 
-// The building vocabulary, in the order a request travels through a system.
 const FORMS = [
-  { id: "storage", glyph: "◯", name: "Vault", body: "Storage: tables, columns, datasets." },
-  { id: "transform", glyph: "☰", name: "Terraces", body: "Transforms: SQL models and jobs that refine data." },
-  { id: "logic", glyph: "▯", name: "Tower", body: "Logic: modules, functions, models. Ribbon windows." },
-  { id: "contract", glyph: "⬡", name: "Prism", body: "Contracts: types, schemas, fields." },
-  { id: "interface", glyph: "◎", name: "Broadcast", body: "Endpoints. The ring on top is the API it serves." },
-  { id: "ui", glyph: "◻", name: "Pavilion", body: "UI: components and pages, in glass." },
-  { id: "insight", glyph: "◩", name: "Observatory", body: "Dashboards, with a lit display on the roof." },
-  { id: "business", glyph: "◠", name: "Dome", body: "Business processes." },
-  { id: "quality", glyph: "▭", name: "Annex", body: "Tests and docs: low, under a thin roof." },
+  { id: "storage", name: "Vault", body: "Tables, columns, datasets." },
+  { id: "transform", name: "Terraces", body: "SQL models and jobs that refine data." },
+  { id: "logic", name: "Tower", body: "Modules, functions, models." },
+  { id: "contract", name: "Prism", body: "Types, schemas, fields." },
+  { id: "interface", name: "Broadcast", body: "Endpoints; the ring is the API it serves." },
+  { id: "ui", name: "Pavilion", body: "Components and pages, in glass." },
+  { id: "insight", name: "Observatory", body: "Dashboards, lit display on the roof." },
+  { id: "business", name: "Dome", body: "Business processes." },
+  { id: "quality", name: "Annex", body: "Tests and docs." },
 ] as const;
 
 // Language bar uses zinc shades, like every chart in the design system.
@@ -102,56 +101,18 @@ export function City3DView({
           <Section title="Reading the map">
             {[
               ["Height", prefs.height === "lines" ? "Lines of code, on a log scale." : "How many files import it, on a log scale."],
-              ["Footprint", "How many components live in the file."],
-              ["Plates", "One per top-level folder, engraved with its name."],
+              prefs.style === "realistic"
+                ? ["Buildings", "Glass towers are the biggest files, offices the middle, brick the smallest. Docs are brick."]
+                : ["Form", "What a file holds decides its shape (see Forms below)."],
+              prefs.style === "realistic" ? ["Blocks", "One city block per top-level folder, with streets between them."] : ["Plate", "One per top-level folder, engraved with its name."],
+              ["Arcs", "Local imports. Pick a file to see what it uses and what uses it. Acid arcs are links Bob found that the parser missed."],
+              ["Hover", "Any building shows its layer, lines, components, test coverage, users and owner."],
             ].map(([k, v]) => (
               <div key={k} className="flex flex-col">
                 <span className="text-body font-semibold text-text-primary">{k}</span>
                 <span className="type-caption">{v}</span>
               </div>
             ))}
-          </Section>
-
-          <Section title="Forms">
-            <p className="type-caption -mt-1">What a file holds decides its shape.</p>
-            {FORMS.filter((f) => data.files.some((x) => x.archetype === f.id)).map((f) => (
-              <div key={f.id} className="flex items-start gap-2.5">
-                <span className="font-mono text-[10px] leading-5 w-[18px] shrink-0 text-center text-text-tertiary" aria-hidden="true">{f.glyph}</span>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-body font-semibold text-text-primary">
-                    {f.name} <span className="type-caption">{data.files.filter((x) => x.archetype === f.id).length}</span>
-                  </span>
-                  <span className="type-caption">{f.body}</span>
-                </div>
-              </div>
-            ))}
-          </Section>
-
-          <Section title="Marks">
-            {[
-              ["Hatching", "Untested components. The hatch covers the untested share of the height."],
-              ["Gold ring", "Holds personal data."],
-              ["Acid light", "High criticality."],
-              ["Acid dashes", "A dependency Bob found that the parser missed."],
-              ["Floor traces", "Dependencies, from a file to the files that use it."],
-            ].map(([k, v]) => (
-              <div key={k} className="flex flex-col">
-                <span className="text-body font-semibold text-text-primary">{k}</span>
-                <span className="type-caption">{v}</span>
-              </div>
-            ))}
-            {data.layers.length > 0 ? (
-              <div className="flex flex-col gap-1.5 pt-1">
-                <span className="text-body font-semibold text-text-primary">Layer outline</span>
-                <span className="type-caption -mt-1">The thin line around each footprint.</span>
-                {data.layers.map((l) => (
-                  <span key={l.id} className="flex items-center gap-2 type-caption">
-                    <span className="size-2.5 rounded-[3px] shrink-0" style={{ background: l.accent }} />
-                    {l.label}
-                  </span>
-                ))}
-              </div>
-            ) : null}
             <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-surface-secondary border border-border">
               {(["zinc", "folder"] as const).map((m) => (
                 <button
@@ -162,11 +123,25 @@ export function City3DView({
                     colorMode === m ? "bg-surface text-text-primary shadow-2xs border border-border" : "text-text-tertiary hover:text-text-primary",
                   )}
                 >
-                  {m === "zinc" ? "Natural" : "By folder"}
+                  {m === "zinc" ? "Zinc" : "By folder"}
                 </button>
               ))}
             </div>
           </Section>
+
+          {prefs.style !== "realistic" ? (
+            <Section title="Forms">
+              {FORMS.filter((f) => data.files.some((x) => x.archetype === f.id)).map((f) => (
+                <div key={f.id} className="flex flex-col">
+                  <span className="text-body font-semibold text-text-primary">
+                    {f.name} <span className="type-caption">{data.files.filter((x) => x.archetype === f.id).length}</span>
+                  </span>
+                  <span className="type-caption">{f.body}</span>
+                </div>
+              ))}
+              <span className="type-caption">Hatching: untested share. Gold ring: personal data. Acid light: critical.</span>
+            </Section>
+          ) : null}
 
           <Section title="Landmarks">
             {(Object.keys(LANDMARK_INFO) as (keyof typeof LANDMARK_INFO)[]).map((k) => {
