@@ -1,0 +1,143 @@
+You are working in the SystemDNA repo. SystemDNA scans a code repository 
+into a cross-layer knowledge graph, predicts what one change (for example 
+renaming a database column) will break across every layer, and shows 
+parallel AI agents fixing each affected part live in a 3D "Agent City". 
+Build the frontend's data contracts and mock data in web/ (React 18 + 
+Vite + TypeScript strict + vitest, already scaffolded). The backend is 
+not ready, so everything must be mockable and must match this spec 
+exactly.
+SPEC
+A. Graph model- Layers (city districts, left to right): database, pipelines, backend, 
+api, frontend, dashboards, business. Tests and docs sit in an extra 
+bottom row: Placement = Layer | "tests_docs".- 19 node types: database: Table, Column | pipelines: SQLModel, SparkJob, 
+Column (derived) | backend: Module, Class, Function, ORMModel, Schema, 
+Field | api: Endpoint | frontend: TSType, TSField, Component | 
+dashboards: Dashboard | tests_docs: Test, Doc | business: 
+BusinessProcess, Owner.- Node id = "prefix:type:qualified_name" with lowercase type and prefixes 
+db, pipe, be, api, fe, dash, test, doc, biz. Examples: 
+db:column:orders.cust_id, pipe:sqlmodel:stg_orders, 
+be:field:OrderOut.cust_id, api:endpoint:GET /api/orders, 
+fe:component:OrdersTable.- Every node: id, type, layer, name, file, line, owner, pii (boolean), 
+criticality ("low"|"medium"|"high"), tested (boolean), parentId? 
+(columns, fields and functions point to their table, model, schema, type 
+or module).- 13 edge types: DERIVES_FROM (column built from another column), READS 
+(job or model reads a column/table), WRITES (job writes a table), MAPS_TO 
+(ORM field to table column), SERIALIZES (API schema field from ORM 
+field), RETURNS (endpoint returns schema), CONSUMES (frontend component 
+Page 10 of 38
+SystemDNA — Frontend Build Plan (Claude + IBM Bob)
+calls endpoint), TYPED_AS (TS field matches API field), IMPORTS, CALLS 
+(Python module/function links), TESTS, DOCUMENTS (test or doc covers a 
+node), SUPPORTS (dashboard supports business process).- Every edge: from, to, type, origin "parser"|"bob", confidence 
+"high"|"medium"|"low", evidence {file, line}, rule 
+"rename_ref"|"keep_alias"|"update_type"|"update_doc". Add a comment on 
+origin: the spec calls this field `source`; renamed to avoid clashing 
+with graph source/target, confirm with backend.
+B. Impact report (ImpactReport)- Change request: {node, change: "rename", to}. Walking downstream: a 
+node that uses the old name directly is "breaking" (keep walking); a node 
+that aliases it (cust_id AS customer_key) is "needs_update" (stop; nodes 
+using the alias are "safe"); a test or doc mentioning it is "update" 
+(stop); a node that only passes data through is "safe" (stop); a medium
+confidence (bob) edge gives the same result plus checkThis=true (keep 
+walking).- risk 0-100 = 35*fanout + 30*criticality + 20*pii + 15*untested, each 
+factor 0..1 (fanout = downstream count / largest fanout; criticality low 
+0, medium 0.5, high 1).- Report fields: changeId, change, analysisMs, affected [{nodeId, layer, 
+severity, risk, evidence, confidence, checkThis, wave?}], 
+businessProcesses [{nodeId, name, owner}], waves [{wave, nodeIds, 
+agentCount}] (topological, upstream first), approvals [{nodeId, reason: 
+"database"|"pii"}], grep {term, foundNodeIds, missed [{nodeId, reason: 
+"alias_chain"|"dynamic_sql"|"cross_language"|"no_literal_reference"}]}.
+C. Agent City states- AgentState (10): queued, permitted, awaiting_approval, reading, 
+editing, verifying, retrying, blocked, quarantined, done.- BuildingState (7): healthy, breaking_or_needs_update, safe, 
+under_construction, inspecting, fixed, needs_human.
+D. Events (AgentEvent), exact snake_case JSON from the agent hooks:
+{"ts":"2026-09-27T10:15:02Z","change_id":"chg-012","agent_id":"fix
+stg_orders","session_id":"bob-session
+id","wave":2,"event":"tool_call|blocked|approved|check_passed|check_faile
+d|done|quarantined","tool":"write_to_file","file":"transforms/stg_orders.
+sql","node":"pipe:sqlmodel:stg_orders","permit_ok":true,"detail":"short 
+text","bobcoins":0.2}
+Also allow orchestrator events queued, permitted, awaiting_approval, 
+wave_started, wave_done, verify, with an optional typed `data` object 
+(verify carries dangling_before, dangling_after, tests_passed, 
+tests_total). Comment them as "needs backend confirmation".
+E. Governance and metrics- AuditEntry: time, change_id, agent_id, wave, event, tool, file, 
+Page 11 of 38
+SystemDNA — Frontend Build Plan (Claude + IBM Bob)
+permit_ok, result, bobcoins.- Metrics: totalMs, perWave [{wave, ms}], serialEstimateMs, waveTimeMs, 
+bobcoinsTotal, bobcoinsByAgent, agents, retries, testsPassed, testsTotal.- GraphDiff: removedEdges, addedEdges, danglingBefore, danglingAfter.
+F. REST API a Live source will call later: GET /graph, GET /node/{id}, 
+POST /changes, GET /changes/{id}, POST /changes/{id}/approve, POST 
+/changes/{id}/run, GET /changes/{id}/diff, GET /changes/{id}/metrics, GET 
+/replay/{id}, and WS /ws for live events.
+SAMPLE REPO "ShopFlow" (model this in the mock graph)
+db/schema.sql: orders(id, cust_id, amount, created_at), customers(id, 
+name, email)
+db/migrations/001_init.sql
+transforms/stg_orders.sql: SELECT cust_id AS customer_key ... (alias 
+trap)
+transforms/fct_revenue.sql: uses customer_key
+transforms/dim_customer.sql: joins customers to orders on cust_id
+pipelines/churn_job.py: PySpark spark.table("orders").select("cust_id")
+pipelines/export_job.py: builds f"SELECT {col} FROM orders" at runtime 
+(dynamic SQL trap), writes exports.orders_csv
+backend/models.py: SQLAlchemy Order.cust_id
+backend/schemas.py: Pydantic OrderOut.cust_id
+backend/routes.py: GET /api/orders and GET /api/customers/{id}/orders, 
+both return OrderOut
+frontend/src/types.ts: interface Order { cust_id: string } (cross
+language trap)
+frontend/src/OrdersTable.tsx: fetch("/api/orders") ... row.cust_id
+dashboards/revenue.yaml: source fct_revenue.customer_key, filter from 
+dim_customer.cust_id
+tests/test_routes.py, tests/test_transforms.py, 
+tests/OrdersTable.test.tsx
+docs/data_dictionary.pdf (owners, PII flags), docs/adr-003-customer
+model.md
+processes.yaml: Monthly Revenue Close (owner Finance) uses the revenue 
+dashboard
+Owners: Data Platform (db, pipelines), Backend team, Frontend team, 
+Finance. PII: orders.cust_id, customers.email.
+TASKS
+1) web/src/contracts/types.ts with every type above: string-literal 
+unions, readonly where sensible, a JSDoc line on each type.
+2) web/src/data/fixtures/graph.json: 60-90 nodes covering every ShopFlow 
+file, with columns and fields as child nodes, and all edges including the 
+Page 12 of 38
+SystemDNA — Frontend Build Plan (Claude + IBM Bob)
+3 traps: the stg_orders alias chain (DERIVES_FROM, rule keep_alias), 
+export_job READS orders.cust_id with origin "bob" and confidence 
+"medium", and fe:tsfield:Order.cust_id TYPED_AS 
+be:field:OrderOut.cust_id.
+3) web/src/data/fixtures/impact-chg-012.json for renaming 
+db:column:orders.cust_id to customer_id, 17 affected nodes: wave 1 (2 
+agents): orders.cust_id migration, ORM Order.cust_id; wave 2 (5): 
+stg_orders (needs_update), dim_customer, churn_job, export_job 
+(checkThis), OrderOut.cust_id; wave 3 (3): GET /api/orders, GET 
+/api/customers/{id}/orders, TS Order.cust_id; wave 4 (6): OrdersTable, 
+revenue dashboard, test_routes, test_transforms, OrdersTable.test 
+(update), adr-003 (update); plus fct_revenue as safe behind the alias. 
+Business process: Monthly Revenue Close (Finance). Approvals: the 
+orders.cust_id migration (database) and dim_customer (pii). Grep for 
+"cust_id" finds about half; list each miss with its reason.
+4) web/src/data/fixtures/events-chg-012.json: a timestamped script 
+covering about 3 minutes: wave_started per wave, queued and permitted per 
+agent, awaiting_approval then approved for the two approval nodes, read 
+then write tool_calls, one blocked event where fix-export_job tries to 
+write backend/routes.py (permit_ok false), one check_failed then retry 
+then check_passed for fix-churn_job, done for every agent, wave_done per 
+wave, and a final verify with dangling_before 16, dangling_after 0 and 
+all tests passing. Plausible bobcoins per event, total under 20.
+5) web/src/data/DataSource.ts interface: getGraph(), getNode(id) 
+returning node + dependsOn + usedBy + evidence, createChange(req), 
+getChange(id), approve(id, nodeId?), run(id), getDiff(id), 
+getMetrics(id), getReplay(id), subscribe(onEvent) returning an 
+unsubscribe function. web/src/data/MockSource.ts implements it from the 
+fixtures and plays the event script on a timer with a speed multiplier 
+(0.5x to 4x) plus pause and resume.
+6) web/src/data/fixtures.test.ts (vitest): every edge endpoint exists; 
+every event node exists; every parentId exists; waves are topologically 
+valid (no node depends on a node in a later wave); the impact report has 
+17 affected nodes.
+Rules: no tokens, keys or real URLs anywhere. Run npx tsc --noEmit and 
+npx vitest run, fix every failure, then summarise the files you created.
