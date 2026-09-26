@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { CheckCircle2, GitPullRequest, Lock, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Check, CheckCircle2, GitPullRequest, Loader2, Lock, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/cn";
 import { indexGraph } from "@/lib/impact";
 import type { AgentState, RunView } from "@/lib/run-state";
-import type { Change, Graph, RunEvent } from "@/lib/types";
+import type { BobStatus, Change, ChangeRunResult, Graph, RunEvent } from "@/lib/types";
 
 export const AGENT_STATE_LABEL: Record<AgentState, string> = {
   queued: "Queued",
@@ -163,7 +163,7 @@ export function GovernancePanel({ view, change, graph }: { view: RunView; change
     <Card title="Governance" subtitle="Every action checked against its permit.">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
-          <p className="type-label">Blocked actions ({view.blocked.length})</p>
+          <p className="font-mono text-[10.5px] leading-4 font-medium uppercase tracking-[0.06em] text-text-tertiary">Blocked actions ({view.blocked.length})</p>
           {view.blocked.length === 0 ? <p className="type-caption">None so far.</p> : null}
           {view.blocked.map((b, i) => (
             <div key={i} className="flex items-start gap-2.5">
@@ -176,7 +176,7 @@ export function GovernancePanel({ view, change, graph }: { view: RunView; change
           ))}
         </div>
         <div className="flex flex-col gap-2">
-          <p className="type-label">Approvals ({view.approvals.length})</p>
+          <p className="font-mono text-[10.5px] leading-4 font-medium uppercase tracking-[0.06em] text-text-tertiary">Approvals ({view.approvals.length})</p>
           {view.approvals.length === 0 && view.pendingApprovals.length === 0 ? <p className="type-caption">None needed.</p> : null}
           {view.pendingApprovals.map((p) => (
             <div key={p.unit} className="flex items-center justify-between gap-2">
@@ -192,7 +192,7 @@ export function GovernancePanel({ view, change, graph }: { view: RunView; change
           ))}
         </div>
         <div className="flex flex-col gap-2">
-          <p className="type-label">Personal data touched ({piiUnits.length})</p>
+          <p className="font-mono text-[10.5px] leading-4 font-medium uppercase tracking-[0.06em] text-text-tertiary">Personal data touched ({piiUnits.length})</p>
           {piiUnits.map((u) => (
             <div key={u.id} className="flex items-center gap-2">
               <Lock className="size-3.5 text-icon-secondary" />
@@ -260,5 +260,102 @@ export function GraphDiffCard({ change, graph, view }: { change: Change; graph: 
         ))}
       </div>
     </Card>
+  );
+}
+
+export type StepState = "done" | "active" | "waiting" | "failed" | "skipped";
+
+/** One horizontal row of numbered steps. Shared by the real run and the pull request. */
+export function StepTrack({ steps }: { steps: { label: string; state: StepState; hint?: string }[] }) {
+  return (
+    <ol className="grid gap-2" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+      {steps.map((s, i) => (
+        <li key={s.label} className="flex flex-col gap-1.5 min-w-0" title={s.hint}>
+          <span
+            className={cn(
+              "h-[3px] rounded-full transition-colors duration-300",
+              s.state === "done" && "bg-success",
+              s.state === "active" && "bg-brand",
+              s.state === "failed" && "bg-error",
+              (s.state === "waiting" || s.state === "skipped") && "bg-surface-secondary",
+            )}
+          />
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span
+              className={cn(
+                "flex size-4 shrink-0 items-center justify-center rounded-[4px] border font-mono text-[9.5px] font-semibold tabular-nums",
+                s.state === "done" && "border-success/30 bg-success-soft text-success",
+                s.state === "active" && "border-brand/60 bg-brand-soft text-brand-text",
+                s.state === "failed" && "border-error/30 bg-error-soft text-error",
+                (s.state === "waiting" || s.state === "skipped") && "border-border text-text-tertiary",
+              )}
+            >
+              {s.state === "done" ? <Check className="size-2.5" strokeWidth={3} /> : s.state === "active" ? <Loader2 className="size-2.5 animate-spin" /> : s.state === "failed" ? <X className="size-2.5" strokeWidth={3} /> : i + 1}
+            </span>
+            <span
+              className={cn(
+                "font-mono text-[10.5px] leading-4 uppercase tracking-[0.06em] truncate",
+                s.state === "active" ? "text-text-primary font-semibold" : s.state === "done" ? "text-text-secondary" : s.state === "failed" ? "text-error font-semibold" : "text-text-tertiary",
+                s.state === "skipped" && "line-through",
+              )}
+            >
+              {s.label}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// The real run's stages, matched against the server's status lines (lib/server/change-agent.ts).
+const RUN_STAGES: { label: string; match: RegExp }[] = [
+  { label: "Clone", match: /^Starting|Cloning/i },
+  { label: "Baseline check", match: /before any edit/i },
+  { label: "Edit", match: /Renaming|Fixer agents/i },
+  { label: "Final check", match: /Final type check/i },
+  { label: "Inspector", match: /Inspector/i },
+  { label: "Preview", match: /$^/ },
+];
+
+/** Where the real run is: clone, baseline, edit, final check, Inspector review, preview. */
+export function RealRunSteps({ run, bob, interrupted }: { run: ChangeRunResult | undefined; bob: BobStatus | null; interrupted: boolean }) {
+  const current = run?.step ? RUN_STAGES.findIndex((s) => s.match.test(run.step!)) : -1;
+  const steps = RUN_STAGES.map((s, i): { label: string; state: StepState; hint?: string } => {
+    if (!run) return { label: s.label, state: "waiting" };
+    if (run.status === "done") {
+      if (s.label === "Inspector" && run.review?.status !== "done") return { label: s.label, state: "skipped", hint: run.review?.status === "skipped" ? run.review.reason : "Not run" };
+      if (s.label === "Preview" && !run.patchId) return { label: s.label, state: "skipped", hint: "No changes to preview" };
+      return { label: s.label, state: "done" };
+    }
+    if (run.status === "failed" || interrupted) {
+      if (s.label === "Preview" && run.patchId) return { label: s.label, state: "done" };
+      return { label: s.label, state: "waiting", hint: "The run stopped before this step finished." };
+    }
+    const at = current < 0 ? 0 : current;
+    return { label: s.label, state: i < at ? "done" : i === at ? "active" : "waiting" };
+  });
+  const bobLabel = !bob ? "Checking IBM Bob…" : bob.ready ? `IBM Bob ready${bob.version ? ` · v${bob.version}` : ""}` : "IBM Bob off";
+  return (
+    <div className="flex flex-col gap-3 px-4 py-3.5 rounded-xl border border-border bg-surface">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-mono text-[10.5px] leading-4 font-medium uppercase tracking-[0.06em] text-text-tertiary">
+          Real run{run?.strategy ? ` · ${run.strategy === "compiler" ? "TypeScript compiler" : "IBM Bob Fixer agents"}` : ""}
+        </span>
+        <span className="flex items-center gap-2">
+          {run?.status === "failed" || interrupted ? <Badge variant="destructive">{interrupted ? "Interrupted" : "Did not finish"}</Badge> : null}
+          {run?.status === "done" ? <Badge variant="success">Finished</Badge> : null}
+          {run?.review?.status === "done" && run.review.bobcoins !== undefined ? (
+            <span className="font-mono text-[10.5px] text-text-tertiary tabular-nums">{run.review.bobcoins.toFixed(2)} Bobcoins</span>
+          ) : null}
+          <Badge variant={!bob ? "neutral" : bob.ready ? "success" : "warning"} title={bob?.reason}>
+            <span className={cn("size-1.5 rounded-full", !bob ? "bg-icon-secondary animate-pulse" : bob.ready ? "bg-success" : "bg-warning")} />
+            {bobLabel}
+          </Badge>
+        </span>
+      </div>
+      <StepTrack steps={steps} />
+      {bob && !bob.ready && bob.reason ? <p className="type-caption">{bob.reason} Renames of TypeScript symbols still run with the compiler.</p> : null}
+    </div>
   );
 }

@@ -85,3 +85,5 @@
 /* Crew tags on the landing page. */
 .model-tag--crew { border-color: rgba(216, 245, 63, 0.4); }
 .model-tag--crew .model-tag-meta { color: #d8f53f; text-transform: none; letter-spacing: 0.02em; }
+.landing-root .model-tag--crew,
+.model-tag--crew { background: rgba(14, 15, 12, 0.9); color: #f3f4ee; border-color: rgba(216, 245, 63, 0.45); }

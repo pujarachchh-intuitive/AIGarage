@@ -195,7 +195,7 @@ export function CityClient() {
   return (
     <PageShell className="h-full">
       <PageHeader
-        title={isReplay ? "Atlas — Replay" : "Atlas"}
+        title={isReplay ? "Agent City — Replay" : "Agent City"}
         subtitle={
           isReplay
             ? "Watching a recorded run. Use the controls below to step through agent activity."

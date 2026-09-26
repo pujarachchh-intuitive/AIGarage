@@ -679,7 +679,7 @@ body {
  * status colour only for state.
  * ------------------------------------------------------------------ */
 
-/* Cytoscape canvas container for the Atlas map */
+/* Cytoscape canvas container for the Agent City map */
 .city-canvas {
   background-color: var(--background);
   background-image: radial-gradient(var(--divider) 1px, transparent 1px);
@@ -891,3 +891,13 @@ html {
     animation: none;
   }
 }
+
+/* Native controls (select menus, scrollbars) follow the app theme. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+select option,
+select optgroup {
+  background-color: var(--surface);
+  color: var(--text-primary);
+}
+select optgroup { color: var(--text-tertiary); font-weight: 500; }

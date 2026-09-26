@@ -6,18 +6,19 @@ import { toast } from "sonner";
 import { CityLegend } from "@/components/city/city-legend";
 import { CityMap, type CityAgent } from "@/components/city/city-map";
 import { GithubAgentPanel } from "@/components/changes/github-agent-panel";
-import { AgentsTable, GovernancePanel, GraphDiffCard, TraceTimeline } from "@/components/changes/run-panels";
+import { AgentsTable, GovernancePanel, GraphDiffCard, RealRunSteps, TraceTimeline } from "@/components/changes/run-panels";
+import { RiskBadge } from "@/components/changes/impact-report";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KpiTile } from "@/components/ui/kpi-tile";
 import { PageHeader, PageShell, PrimaryLink, primaryButton, secondaryButton } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { approveChange, DEMO_REPOS, subscribeEvents } from "@/lib/api";
+import { approveChange, DEMO_REPOS, fetchBobStatus, subscribeEvents } from "@/lib/api";
 import { isRealRunning, realRunTarget, startRealRun, stopRealRun } from "@/lib/real-run";
 import { buildReport, downloadText } from "@/lib/report";
 import { deriveRun, formatDuration, type BuildingState, type RunStatus } from "@/lib/run-state";
 import { approveSimulation, isSimulating, startSimulation, stopSimulation } from "@/lib/simulator";
 import { useApp, useChange } from "@/lib/store";
-import type { ChangeRunResult, RunStrategy, Severity } from "@/lib/types";
+import type { BobStatus, ChangeRunResult, RunStrategy, Severity } from "@/lib/types";
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   planned: "Planned",
@@ -78,6 +79,11 @@ export function RunClient({ id }: { id: string }) {
   const setRepo = useApp((s) => s.setRepo);
   const setRun = useApp((s) => s.setRun);
   const [now, setNow] = useState(() => Date.now());
+  // Whether IBM Bob can run on the server, shown next to the real run's steps.
+  const [bob, setBob] = useState<BobStatus | null>(null);
+  useEffect(() => {
+    void fetchBobStatus().then(setBob);
+  }, []);
 
   // A change belongs to one repo: show it against that repo's graph.
   const wrongRepo = Boolean(change?.repo && graph && graph.repo !== change.repo);
@@ -250,7 +256,12 @@ export function RunClient({ id }: { id: string }) {
     <PageShell>
       <PageHeader
         title={change.title}
-        meta={<StatusBadge status={STATUS_LABEL[view.status]} />}
+        meta={
+          <>
+            <StatusBadge status={STATUS_LABEL[view.status]} />
+            {change.report.risk ? <RiskBadge score={change.report.risk.score} level={change.report.risk.level} /> : null}
+          </>
+        }
         subtitle={`${change.id} · ${change.report.items.filter((i) => i.severity !== "safe").length} components affected · ${change.report.fixUnits.length} files · ${change.report.waveCount} waves`}
         actions={
           <>
@@ -295,6 +306,7 @@ export function RunClient({ id }: { id: string }) {
       ) : null}
 
       {isRealRun ? <RealRunBanner run={run} interrupted={interrupted} running={realRunning} /> : null}
+      {isRealRun ? <RealRunSteps run={run} bob={bob} interrupted={interrupted} /> : null}
 
       <GithubAgentPanel change={change} graph={graph} reportMarkdown={() => buildReport(change, graph, view)} />
 

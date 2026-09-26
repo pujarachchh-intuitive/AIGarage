@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, FileArchive, GitBranch, Link2, Loader2, Map as MapIcon, Upload, X } from "lucide-react";
+import { Check, ExternalLink, FileArchive, GitBranch, Link2, Loader2, Map as MapIcon, Upload, X } from "lucide-react";
+import { StatusDot, bobState, useConnections } from "@/components/layout/sidebar";
 import { Card, PageHeader, PageShell, SecondaryLink, inputClass, primaryButton, secondaryButton } from "@/components/ui/page";
-import { connectRepo, fetchBobStatus } from "@/lib/api";
+import { connectRepo, fetchBobStatus, fetchGithubStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/lib/store";
-import type { BobStatus, ConnectedRepo, IngestEvent } from "@/lib/types";
+import type { BobStatus, ConnectedRepo, GithubStatus, IngestEvent } from "@/lib/types";
 
 // The steps the ingestion service reports, in order. Scanner steps map onto them.
 const STEPS = [
@@ -62,6 +63,26 @@ export function ConnectRepoClient() {
       setUseBob(s.ready);
     });
   }, []);
+
+  // GitHub App mode: tell the user whether the app is installed on the repo they typed.
+  const { github } = useConnections();
+  const [ghRepo, setGhRepo] = useState<{ url: string; status: GithubStatus } | null>(null);
+  const typedGithub = mode === "git" && /^https?:\/\/(www\.)?github\.com\/[^/\s]+\/[^/\s]+/i.test(url.trim()) ? url.trim() : "";
+  const appMode = github?.mode === "app" && !github.error;
+  useEffect(() => {
+    if (!appMode || !typedGithub) return;
+    let live = true;
+    const t = setTimeout(() => {
+      void fetchGithubStatus(typedGithub).then((status) => {
+        if (live) setGhRepo({ url: typedGithub, status });
+      });
+    }, 500);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [appMode, typedGithub]);
+  const ghCheck = appMode && typedGithub ? (ghRepo?.url === typedGithub ? ghRepo.status : null) : undefined;
 
   // The Bob step shows only when Bob enrichment is on.
   const steps = STEPS.filter((s) => s.id !== "bob" || useBob);
@@ -162,6 +183,26 @@ export function ConnectRepoClient() {
                     disabled={phase === "running"}
                   />
                   <span className="type-caption">Public repos on GitHub, GitLab or Bitbucket.</span>
+                  {ghCheck !== undefined ? (
+                    <span className="flex items-center gap-2 mt-0.5">
+                      <StatusDot tone={ghCheck === null ? "pending" : ghCheck.error ? "error" : ghCheck.installed ? "ok" : "warn"} />
+                      <span className="type-caption flex-1 min-w-0 truncate">
+                        {ghCheck === null
+                          ? "Checking the GitHub App on this repo…"
+                          : ghCheck.error
+                            ? ghCheck.error
+                            : ghCheck.installed
+                              ? `${ghCheck.app?.name ?? "The GitHub App"} is installed here. The agent can open pull requests.`
+                              : "The GitHub App is not installed here. Scanning works; pull requests need the app."}
+                      </span>
+                      {ghCheck && !ghCheck.error && !ghCheck.installed && ghCheck.app ? (
+                        <a href={ghCheck.app.installUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 type-caption font-semibold text-text-primary hover:underline shrink-0">
+                          Install
+                          <ExternalLink className="size-3" />
+                        </a>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </label>
                 <label className="flex flex-col gap-1.5">
                   <span className="type-label">Branch (optional)</span>
@@ -221,7 +262,14 @@ export function ConnectRepoClient() {
                 onChange={(e) => setUseBob(e.target.checked)}
               />
               <span className="flex flex-col gap-0.5">
-                <span className="type-label">Enrich with IBM Bob</span>
+                <span className="flex items-center gap-2">
+                  <span className="type-label">Enrich with IBM Bob</span>
+                  <StatusDot tone={bobState(bobStatus).tone} />
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary">
+                    {bobState(bobStatus).short}
+                    {bobStatus?.version ? ` · v${bobStatus.version.replace(/^v/, "")}` : ""}
+                  </span>
+                </span>
                 <span className="type-caption">
                   {bobStatus === null
                     ? "Checking IBM Bob…"
@@ -313,7 +361,7 @@ export function ConnectRepoClient() {
               <div className="flex flex-wrap gap-3">
                 <button className={primaryButton} onClick={() => open("/city?view=3d")}>
                   <MapIcon />
-                  Open Atlas
+                  Open Agent City
                 </button>
                 <button className={secondaryButton} onClick={() => open("/city?view=graph")}>
                   Graph view

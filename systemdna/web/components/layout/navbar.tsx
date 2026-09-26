@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Command, Search } from "lucide-react";
+import { StatusDot, bobState, githubState, useConnections } from "@/components/layout/sidebar";
 import { DEMO_REPOS } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { layerLabel } from "@/lib/layers";
@@ -14,6 +16,11 @@ export default function Navbar() {
   const repoId = useApp((s) => s.repoId);
   const setRepo = useApp((s) => s.setRepo);
   const repos = useApp((s) => s.repos);
+  const { github, bob } = useConnections();
+  const conns = [
+    { name: "GitHub", state: githubState(github) },
+    { name: "Bob", state: bobState(bob) },
+  ];
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -119,6 +126,19 @@ export default function Navbar() {
       </div>
 
       <div className="flex items-center gap-3">
+        <Link
+          href="/settings"
+          className="hidden md:flex items-center gap-3 h-9 px-3 border border-border rounded-lg bg-surface hover:border-border-strong transition-colors"
+          title={conns.map((c) => `${c.name}: ${c.state.label}`).join("\n")}
+          aria-label={`Connections. ${conns.map((c) => `${c.name}: ${c.state.label}`).join(". ")}`}
+        >
+          {conns.map((c) => (
+            <span key={c.name} className="inline-flex items-center gap-1.5">
+              <StatusDot tone={c.state.tone} />
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary">{c.name}</span>
+            </span>
+          ))}
+        </Link>
         <label className="relative h-9 pl-3 pr-8 flex items-center gap-2 border border-border rounded-lg bg-surface leading-tight hover:border-border-strong transition-colors cursor-pointer">
           <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary">Repo</span>
           <select

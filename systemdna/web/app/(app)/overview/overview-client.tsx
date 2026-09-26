@@ -4,7 +4,9 @@ import { useMemo, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Boxes, GitBranch, Map as MapIcon, Network, ShieldCheck, Sparkles } from "lucide-react";
+import { StatusDot, bobState, githubState, useConnections } from "@/components/layout/sidebar";
 import { KpiTile } from "@/components/ui/kpi-tile";
+import { LocalTime } from "@/components/ui/local-time";
 import { Card, PageHeader, PageShell, PrimaryLink, SecondaryLink } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { deriveRun, type RunStatus } from "@/lib/run-state";
@@ -36,6 +38,12 @@ export function OverviewClient() {
   const graph = useApp((s) => s.graph);
   const changes = useRepoChanges();
   const mounted = useMounted();
+  const repos = useApp((s) => s.repos);
+  const repoId = useApp((s) => s.repoId);
+  const { github, bob } = useConnections();
+  const connected = repos.find((r) => r.id === repoId);
+  const gh = githubState(github);
+  const bs = bobState(bob);
 
   const stats = useMemo(() => {
     if (!graph) return null;
@@ -72,7 +80,7 @@ export function OverviewClient() {
           <>
             <SecondaryLink href="/city">
               <MapIcon />
-              Open Atlas
+              Open Agent City
             </SecondaryLink>
             <PrimaryLink href="/changes/new">
               <GitBranch />
@@ -81,6 +89,30 @@ export function OverviewClient() {
           </>
         }
       />
+
+      <Link
+        href="/settings"
+        className="grid grid-cols-1 sm:grid-cols-3 border border-border rounded-xl divide-y sm:divide-y-0 sm:divide-x divide-border hover:border-border-strong transition-colors"
+      >
+        {[
+          { k: "GitHub", tone: gh.tone, v: gh.label },
+          { k: "IBM Bob", tone: bs.tone, v: bs.label },
+        ].map((c) => (
+          <div key={c.k} className="flex items-center gap-3 px-4 py-2.5 min-w-0">
+            <StatusDot tone={c.tone} />
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary shrink-0">{c.k}</span>
+            <span className="text-body text-text-secondary truncate">{c.v}</span>
+          </div>
+        ))}
+        <div className="flex items-center gap-3 px-4 py-2.5 min-w-0">
+          <StatusDot tone={graph ? "ok" : "pending"} />
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary shrink-0">Scanned</span>
+          <span className="text-body text-text-secondary truncate tabular-nums">
+            {graph ? <LocalTime iso={connected?.scannedAt ?? graph.scannedAt} /> : "…"}
+            {connected ? ` · ${connected.stats.files.toLocaleString()} files` : ""}
+          </span>
+        </div>
+      </Link>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <KpiTile label="Components" value={graph?.nodes.length ?? "—"} icon={Boxes} delta={{ text: `${graph?.layers.length ?? 0} layers`, tone: "neutral" }} />

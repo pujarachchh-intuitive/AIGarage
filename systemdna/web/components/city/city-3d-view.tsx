@@ -16,18 +16,6 @@ const LANDMARK_INFO = {
   hotspot: { label: "Hotspot", body: "Unusually large. Often where complexity hides.", swatch: "bg-warning" },
 } as const;
 
-const FORMS = [
-  { id: "storage", name: "Vault", body: "Tables, columns, datasets." },
-  { id: "transform", name: "Terraces", body: "SQL models and jobs that refine data." },
-  { id: "logic", name: "Tower", body: "Modules, functions, models." },
-  { id: "contract", name: "Prism", body: "Types, schemas, fields." },
-  { id: "interface", name: "Broadcast", body: "Endpoints; the ring is the API it serves." },
-  { id: "ui", name: "Pavilion", body: "Components and pages, in glass." },
-  { id: "insight", name: "Observatory", body: "Dashboards, lit display on the roof." },
-  { id: "business", name: "Dome", body: "Business processes." },
-  { id: "quality", name: "Annex", body: "Tests and docs." },
-] as const;
-
 // Language bar uses zinc shades, like every chart in the design system.
 const LANG_SHADES = ["var(--pie-1)", "var(--pie-3)", "var(--pie-5)", "var(--pie-6)", "var(--pie-4)", "var(--pie-2)"];
 
@@ -103,10 +91,9 @@ export function City3DView({
               ["Height", prefs.height === "lines" ? "Lines of code, on a log scale." : "How many files import it, on a log scale."],
               prefs.style === "realistic"
                 ? ["Buildings", "Glass towers are the biggest files, offices the middle, brick the smallest. Docs are brick."]
-                : ["Form", "What a file holds decides its shape (see Forms below)."],
-              prefs.style === "realistic" ? ["Blocks", "One city block per top-level folder, with streets between them."] : ["Plate", "One per top-level folder, engraved with its name."],
-              ["Arcs", "Local imports. Pick a file to see what it uses and what uses it. Acid arcs are links Bob found that the parser missed."],
-              ["Hover", "Any building shows its layer, lines, components, test coverage, users and owner."],
+                : ["Colour", colorMode === "zinc" ? "One zinc shade per top-level folder." : "The top-level folder a file lives in."],
+              prefs.style === "realistic" ? ["Blocks", "One city block per top-level folder, with streets between them."] : ["Plate", "One district, sized to the files it holds."],
+              ["Arcs", "Local imports. Pick a file to see what it uses and what uses it."],
             ].map(([k, v]) => (
               <div key={k} className="flex flex-col">
                 <span className="text-body font-semibold text-text-primary">{k}</span>
@@ -128,20 +115,6 @@ export function City3DView({
               ))}
             </div>
           </Section>
-
-          {prefs.style !== "realistic" ? (
-            <Section title="Forms">
-              {FORMS.filter((f) => data.files.some((x) => x.archetype === f.id)).map((f) => (
-                <div key={f.id} className="flex flex-col">
-                  <span className="text-body font-semibold text-text-primary">
-                    {f.name} <span className="type-caption">{data.files.filter((x) => x.archetype === f.id).length}</span>
-                  </span>
-                  <span className="type-caption">{f.body}</span>
-                </div>
-              ))}
-              <span className="type-caption">Hatching: untested share. Gold ring: personal data. Acid light: critical.</span>
-            </Section>
-          ) : null}
 
           <Section title="Landmarks">
             {(Object.keys(LANDMARK_INFO) as (keyof typeof LANDMARK_INFO)[]).map((k) => {

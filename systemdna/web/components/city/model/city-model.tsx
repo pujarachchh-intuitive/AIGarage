@@ -170,7 +170,7 @@ export function CityModel({
   const src = useMemo(() => storySource(data), [data]);
   const srcPos = layout.positions.get(src);
   const impact = useMemo(() => impactRings(data, src), [data, src]);
-  const crewZ = plinth.d / 2 + 3.2;
+  const crewZ = plinth.d / 2 + 6.5;
 
   // Story cameras, one per chapter.
   useEffect(() => {
@@ -236,7 +236,7 @@ export function CityModel({
     const k = 1 - Math.exp(-dt * 7);
 
     // Slow turntable on the landing page (except in plan view), and when asked in the app.
-    if (!reduceMotion && ((storyMode && ch !== 1) || (!storyMode && autoRotate))) controls.current?.rotate(dt * 0.035, 0, false);
+    if (!reduceMotion && ((storyMode && ch !== 1 && ch !== 3) || (!storyMode && autoRotate))) controls.current?.rotate(dt * 0.035, 0, false);
 
     for (const e of L.entries) {
       const path = e.file.path;
@@ -630,7 +630,7 @@ export function CityModel({
 
       {/* The Bob crew, in front of the model. */}
       {crew ? (
-        <group position={[0, 0, crewZ]}>
+        <group position={[0, 0, crewZ]} scale={1.8}>
           <Crew active={story === 3} working={story === 3} reduceMotion={reduceMotion} />
         </group>
       ) : null}

@@ -1,7 +1,7 @@
 "use client";
 
 // The view on screen registers a function that returns a PNG of itself.
-// The Atlas toolbar calls it for "Download image".
+// The Agent City toolbar calls it for "Download image".
 
 type Snapshot = () => string | null;
 

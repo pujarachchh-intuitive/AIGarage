@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
@@ -10,10 +10,6 @@ import { canvasToPng, registerSnapshot } from "@/lib/city-export";
 import { cn } from "@/lib/cn";
 import { FOOTPRINT, layoutCity, type CityData } from "@/lib/city";
 import { useIsDark } from "@/lib/theme";
-import { CityModel3D } from "@/components/city/city-model-3d";
-import { ModelCard } from "@/components/city/model/city-model";
-import { BRAND } from "@/lib/palette";
-import "@/components/city/model/model.css";
 import { readTokens, type Tokens } from "@/lib/tokens";
 
 export type CityColorMode = "zinc" | "folder";
@@ -81,7 +77,7 @@ function fade(m: THREE.Material, dim: boolean, dimOpacity: number) {
   m.depthWrite = !dim;
 }
 
-function RealisticCity3D({
+export function City3D({
   data,
   selected,
   onSelect,
@@ -97,8 +93,6 @@ function RealisticCity3D({
   className,
 }: City3DProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<{ path: string; x: number; y: number } | null>(null);
-  const hoverCard = useRef(setHover);
   const isDark = useIsDark();
   const layout = useMemo(() => layoutCity(data, heightMode), [data, heightMode]);
   const onSelectRef = useRef(onSelect);
@@ -282,7 +276,7 @@ function RealisticCity3D({
     }
 
     // Import arcs.
-    const arcs: { line: THREE.Line; mat: THREE.LineBasicMaterial; from: string; to: string; bob: boolean }[] = [];
+    const arcs: { line: THREE.Line; mat: THREE.LineBasicMaterial; from: string; to: string }[] = [];
     for (const l of data.links) {
       const a = layout.positions.get(l.from);
       const b = layout.positions.get(l.to);
@@ -296,7 +290,7 @@ function RealisticCity3D({
       const mat = new THREE.LineBasicMaterial({ color: t.textTertiary, transparent: true, opacity: 0.18 });
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28)), mat);
       scene.add(line);
-      arcs.push({ line, mat, from: l.from, to: l.to, bob: Boolean(l.bob) });
+      arcs.push({ line, mat, from: l.from, to: l.to });
     }
 
     // Camera: fit the city in view from a fixed isometric angle.
@@ -373,9 +367,8 @@ function RealisticCity3D({
         const touches = file && (a.from === file.path || a.to === file.path);
         const inDir = !fd || built.get(a.from)?.dir === fd || built.get(a.to)?.dir === fd;
         a.line.visible = am === "none" ? false : file ? Boolean(touches) : am === "selected" ? false : inDir;
-        // Links Bob found (and the parser missed) are drawn in acid.
-        a.mat.color.set(a.bob ? BRAND.acid : touches ? t.textPrimary : t.textTertiary);
-        a.mat.opacity = touches ? 0.95 : a.bob ? 0.75 : fd ? 0.35 : 0.18;
+        a.mat.color.set(touches ? t.textPrimary : t.textTertiary);
+        a.mat.opacity = touches ? 0.95 : fd ? 0.35 : 0.18;
       }
     };
     apply();
@@ -407,8 +400,6 @@ function RealisticCity3D({
         hoverQueued = false;
         const p = pick(e);
         renderer.domElement.style.cursor = p ? "pointer" : "grab";
-        const r = renderer.domElement.getBoundingClientRect();
-        hoverCard.current(p ? { path: p, x: e.clientX - r.left, y: e.clientY - r.top } : null);
         if (p !== viewRef.current.hovered) {
           viewRef.current.hovered = p;
           apply();
@@ -492,22 +483,12 @@ function RealisticCity3D({
     api.current?.apply();
   }, [selected, focusDir, arcMode, labelMode, autoRotate]);
 
-  const card = hover ? data.files.find((f) => f.path === hover.path) : undefined;
   const iconBtn =
     "cursor-pointer flex items-center justify-center size-9 bg-surface border border-border rounded-lg text-icon-secondary hover:text-text-primary hover:bg-surface-hover hover:border-border-strong shadow-2xs active:scale-95 transition-all duration-150";
 
   return (
     <div className={cn("relative overflow-hidden city-canvas", className)}>
       <div ref={hostRef} className="absolute inset-0" />
-      {card && hover ? (
-        <div className="absolute pointer-events-none z-10" style={{ left: hover.x, top: hover.y - 10 }}>
-          <ModelCard
-            file={card}
-            layer={card.layer ? data.layers.find((l) => l.id === card.layer) : undefined}
-            bobLinks={data.links.filter((l) => l.bob && (l.from === card.path || l.to === card.path)).length}
-          />
-        </div>
-      ) : null}
       <div className="absolute top-3 right-3 flex flex-col gap-2 select-none">
         <button className={iconBtn} onClick={() => api.current?.zoom(1.25)} aria-label="Zoom in" title="Zoom in">
           <Plus className="size-4" />
@@ -543,14 +524,4 @@ function RealisticCity3D({
       </div>
     </div>
   );
-}
-
-/**
- * The 3D view. Realistic (the default) draws a living city: textured buildings, streets,
- * trees, water, sky and weather. Schematic draws the system model, where each building's
- * form says what the file holds.
- */
-export function City3D(props: City3DProps) {
-  if (props.realistic === false) return <CityModel3D {...props} />;
-  return <RealisticCity3D {...props} />;
 }

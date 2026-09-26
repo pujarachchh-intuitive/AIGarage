@@ -324,7 +324,7 @@ export function LandingPage() {
                 style={{ "--d": "320ms" } as React.CSSProperties}
               >
                 <Link href="/city" className="lp-btn lp-btn-acid">
-                  Enter the Atlas
+                  Enter Agent City
                   <span className="lp-btn-dot">
                     <Arrow />
                   </span>

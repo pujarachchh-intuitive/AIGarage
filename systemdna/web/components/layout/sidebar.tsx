@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, useSyncExternalStore, type ComponentType } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -15,8 +15,100 @@ import {
   Sun,
 } from "lucide-react";
 import Logo from "@/components/icons/logo";
+import { fetchBobStatus, fetchGithubStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { setDarkMode, useIsDark } from "@/lib/theme";
+import type { BobStatus, GithubStatus } from "@/lib/types";
+
+// ---------------------------------------------------------------------------
+// Connection state (GitHub + IBM Bob), shared by the chrome and the pages.
+// At most one check per 30 s; re-checked when the window regains focus.
+// ---------------------------------------------------------------------------
+
+export interface Connections {
+  github: GithubStatus | null;
+  bob: BobStatus | null;
+}
+
+const EMPTY: Connections = { github: null, bob: null };
+let snapshot: Connections = EMPTY;
+let lastAt = 0;
+let inflight: Promise<void> | null = null;
+const connListeners = new Set<() => void>();
+
+export function refreshConnections(force = false): Promise<void> {
+  if (inflight) return inflight;
+  if (!force && Date.now() - lastAt < 30_000) return Promise.resolve();
+  lastAt = Date.now();
+  inflight = Promise.all([
+    fetchGithubStatus().catch((): GithubStatus => ({ configured: false, mode: "none", error: "Status check failed" })),
+    fetchBobStatus(),
+  ])
+    .then(([github, bob]) => {
+      snapshot = { github, bob };
+      connListeners.forEach((l) => l());
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
+function subscribeConnections(onChange: () => void) {
+  connListeners.add(onChange);
+  return () => {
+    connListeners.delete(onChange);
+  };
+}
+
+/** GitHub and IBM Bob status from the server. Each is null while the first check runs. */
+export function useConnections(): Connections {
+  const value = useSyncExternalStore(subscribeConnections, () => snapshot, () => EMPTY);
+  useEffect(() => {
+    void refreshConnections();
+    const onFocus = () => void refreshConnections();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+  return value;
+}
+
+export type ConnTone = "ok" | "warn" | "error" | "off" | "pending";
+
+export interface ConnState {
+  tone: ConnTone;
+  /** Short mono label, e.g. "App", "Token", "Ready", "Off". */
+  short: string;
+  /** One-line description. */
+  label: string;
+}
+
+export function githubState(s: GithubStatus | null): ConnState {
+  if (!s) return { tone: "pending", short: "…", label: "Checking GitHub" };
+  if (s.error) return { tone: "error", short: "Error", label: s.error };
+  if (s.mode === "app") return { tone: "ok", short: "App", label: `GitHub App${s.app ? ` · ${s.app.name}` : ""}` };
+  if (s.mode === "token") return { tone: "ok", short: "Token", label: `Personal token${s.login ? ` · @${s.login}` : ""}` };
+  return { tone: "off", short: "Off", label: "Not connected" };
+}
+
+export function bobState(s: BobStatus | null): ConnState {
+  if (!s) return { tone: "pending", short: "…", label: "Checking IBM Bob" };
+  if (s.ready) return { tone: "ok", short: "Ready", label: `Ready${s.version ? ` · v${s.version.replace(/^v/, "")}` : ""}` };
+  if (s.cli) return { tone: "warn", short: "No key", label: "Bob Shell installed, API key not set" };
+  return { tone: "off", short: "Off", label: s.configured ? "API key set, Bob Shell not installed" : "Not set up" };
+}
+
+const DOT_TONE: Record<ConnTone, string> = {
+  ok: "bg-success",
+  warn: "bg-warning",
+  error: "bg-error",
+  off: "bg-text-disabled",
+  pending: "bg-border-strong animate-pulse",
+};
+
+export function StatusDot({ tone, className }: { tone: ConnTone; className?: string }) {
+  return <span aria-hidden className={cn("inline-block size-1.5 rounded-full shrink-0", DOT_TONE[tone], className)} />;
+}
 
 // Branch connector copied from the HRMS sidebar.
 function BranchConnector({ count, activeChildIndex }: { count: number; activeChildIndex: number }) {
@@ -57,7 +149,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, href: "/overview" },
   { label: "Repositories", icon: FolderGit2, href: "/repos" },
-  { label: "Atlas", icon: MapIcon, href: "/city" },
+  { label: "Agent City", icon: MapIcon, href: "/city" },
   {
     label: "Changes",
     icon: GitBranch,
@@ -79,6 +171,11 @@ function isActivePath(pathname: string, href: string) {
 export default function Sidebar() {
   const pathname = usePathname();
   const isDark = useIsDark();
+  const { github, bob } = useConnections();
+  const conns = [
+    { name: "GitHub", state: githubState(github) },
+    { name: "IBM Bob", state: bobState(bob) },
+  ];
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ Changes: true });
 
@@ -178,6 +275,30 @@ export default function Sidebar() {
       </nav>
 
       <div className="p-4 space-y-2">
+        <Link
+          href="/settings"
+          className={cn(
+            "flex flex-col rounded-md hover:bg-surface-hover/70 transition-colors",
+            collapsed ? "items-center gap-2 py-2" : "gap-1 px-3 py-2",
+          )}
+          title={conns.map((c) => `${c.name}: ${c.state.label}`).join("\n")}
+          aria-label={`Connections. ${conns.map((c) => `${c.name}: ${c.state.label}`).join(". ")}`}
+        >
+          {!collapsed ? (
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary pb-0.5">Connections</span>
+          ) : null}
+          {conns.map((c) =>
+            collapsed ? (
+              <StatusDot key={c.name} tone={c.state.tone} className="size-2" />
+            ) : (
+              <span key={c.name} className="flex items-center gap-2 h-5">
+                <StatusDot tone={c.state.tone} />
+                <span className="type-caption text-text-secondary flex-1 truncate">{c.name}</span>
+                <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary">{c.state.short}</span>
+              </span>
+            ),
+          )}
+        </Link>
         <div
           className={cn(
             "flex items-center justify-between text-body font-medium text-text-primary",
