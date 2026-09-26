@@ -1,0 +1,24 @@
+/* Landing page styles. Scoped to .landing-root so they never leak into the dashboard pages. */
+
+.landing-root {
+  min-height: 100vh;
+  background: #05070d;
+  color: #fff;
+  font-family: var(--font-space-grotesk), ui-sans-serif, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html:has(.landing-root) {
+  scroll-behavior: smooth;
+}
+
+.landing-root ::-webkit-scrollbar { width: 6px; }
+.landing-root ::-webkit-scrollbar-track { background: transparent; }
+.landing-root ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
+
+.landing-root :focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}

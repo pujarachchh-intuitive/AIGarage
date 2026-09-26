@@ -20,6 +20,7 @@ export function CityClient() {
   const selected = params.get("node");
   const layer = (params.get("layer") as LayerId | null) ?? "all";
   const view = params.get("view") === "3d" ? "3d" : "map";
+  const isReplay = params.get("mode") === "replay";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params.toString());
@@ -40,9 +41,11 @@ export function CityClient() {
   return (
     <PageShell className="h-full">
       <PageHeader
-        title="Agent City"
+        title={isReplay ? "Agent City — Replay" : "Agent City"}
         subtitle={
-          counts
+          isReplay
+            ? "Watching a recorded run. Use the controls below to step through agent activity."
+            : counts
             ? `Every component and dependency in ${graph?.repo}: ${counts.nodes} components, ${counts.edges} dependencies, ${counts.bob} found by Bob.`
             : "Loading the knowledge graph…"
         }
