@@ -1,0 +1,10 @@
+dashboard: revenue
+owner: Finance
+criticality: high
+source: fct_revenue
+metrics:
+  - name: total_revenue
+    column: total_revenue
+  - name: order_count
+    column: order_count
+groupBy: customer_key
