@@ -701,18 +701,62 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Scroll reveal: children fade and lift in once they are on screen. */
+/* Lenis owns wheel scrolling on the landing page; native smooth scroll would fight it. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+html.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+/* Landing sections that are dark in both themes: exempt from the dark-mode zinc remap. */
+.dark .landing-night.bg-zinc-950 {
+  background-color: #09090b !important;
+  color: #fff !important;
+}
+
+/* Landing titles: an editorial display serif. */
+.landing-display {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+
+/* Hero scroll-out: the words drift up and dissolve while the city sinks and grows.
+   --scroll (0 to 1) is written by the page as the hero leaves the screen. */
+.landing-hero-copy {
+  transform: translate3d(0, calc(var(--scroll, 0) * -140px), 0);
+  opacity: calc(1 - var(--scroll, 0) * 1.35);
+  filter: blur(calc(var(--scroll, 0) * 8px));
+  will-change: transform, opacity, filter;
+}
+.landing-hero-scene {
+  transform: translate3d(0, calc(var(--scroll, 0) * 90px), 0) scale(calc(1 + var(--scroll, 0) * 0.14));
+  opacity: calc(1 - var(--scroll, 0) * 0.7);
+  transform-origin: 60% 60%;
+  will-change: transform, opacity;
+}
+.landing-hero-card {
+  translate: 0 calc(var(--scroll, 0) * -60px);
+}
+
+/* Scroll reveal: children rise out of a soft blur once they are on screen. */
 .landing-reveal {
   opacity: 0;
-  transform: translateY(28px);
+  transform: translate3d(0, 56px, 0) scale(0.975);
+  filter: blur(10px);
   transition:
-    opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 1.1s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 1.3s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 1.1s cubic-bezier(0.16, 1, 0.3, 1);
   transition-delay: var(--reveal-delay, 0ms);
 }
 .landing-reveal[data-shown] {
   opacity: 1;
   transform: none;
+  filter: none;
 }
 
 /* Hero words rise in on first load. */
@@ -804,7 +848,9 @@ html {
   }
   .landing-reveal,
   .landing-rise,
-  .landing-screen-in {
+  .landing-screen-in,
+  .landing-hero-copy,
+  .landing-hero-scene {
     opacity: 1;
     transform: none;
     filter: none;

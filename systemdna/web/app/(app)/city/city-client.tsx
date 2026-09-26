@@ -340,6 +340,14 @@ export function CityClient() {
                     <PrefRow label="Local graph" hint="Hops from the selected node">
                       <Segmented value={prefs.graph.localDepth} onChange={(v) => prefs.setGraph({ localDepth: v })} options={[{ id: 0, label: "Off" }, { id: 1, label: "1" }, { id: 2, label: "2" }, { id: 3, label: "3" }]} />
                     </PrefRow>
+                    <PrefRow label="Space theme" hint="Stars, planets and comets">
+                      <Segmented value={prefs.graph.space ? "on" : "off"} onChange={(v) => prefs.setGraph({ space: v === "on" })} options={[{ id: "off", label: "Off" }, { id: "on", label: "On" }]} />
+                    </PrefRow>
+                    {prefs.graph.space ? (
+                      <PrefRow label="Galaxy rotation">
+                        <Segmented value={prefs.graph.autoRotate ? "on" : "off"} onChange={(v) => prefs.setGraph({ autoRotate: v === "on" })} options={[{ id: "off", label: "Off" }, { id: "on", label: "On" }]} />
+                      </PrefRow>
+                    ) : null}
                     <p className="type-caption">Forces, filters and display live in the graph&apos;s own settings panel. They are saved too.</p>
                   </div>
 

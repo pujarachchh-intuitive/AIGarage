@@ -40,6 +40,7 @@ import { typeColor } from "@/components/landing/palette";
 import { cn } from "@/lib/cn";
 import type { LandingData } from "@/lib/landing-data";
 import { setDarkMode, useIsDark } from "@/lib/theme";
+import { displayFont } from "@/components/landing/fonts";
 
 // Three.js loads only in the browser, in its own bundle.
 const HeroScene = dynamic(() => import("@/components/landing/hero-scene").then((m) => m.HeroScene), { ssr: false });
@@ -69,6 +70,53 @@ function useInView<T extends Element>(margin = "0px 0px -12% 0px") {
     return () => io.disconnect();
   }, [margin, seen]);
   return [ref, seen] as const;
+}
+
+const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Smooth, weighted wheel scrolling. Lenis drives the native scroll position, so
+ *  scroll events, anchors and IntersectionObserver keep working unchanged. */
+function useSmoothScroll() {
+  useEffect(() => {
+    if (reducedMotion()) return;
+    let cancelled = false;
+    let lenis: { destroy(): void } | null = null;
+    import("lenis")
+      .then(({ default: Lenis }) => {
+        if (cancelled) return;
+        lenis = new Lenis({ autoRaf: true, lerp: 0.075, wheelMultiplier: 0.9, anchors: { offset: -64 } });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      lenis?.destroy();
+    };
+  }, []);
+}
+
+/** Writes how far the element has scrolled out of view (0 to 1) to its `--scroll` variable. */
+function useScrollOut<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || reducedMotion()) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const p = Math.min(1, Math.max(0, window.scrollY / Math.max(1, el.offsetHeight)));
+      el.style.setProperty("--scroll", p.toFixed(4));
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+  return ref;
 }
 
 /** Fades and lifts its children in when they scroll into view. */
@@ -113,7 +161,7 @@ function SectionHeading({ eyebrow, title, children, center = false, dark = false
         <span className={cn("h-px w-6", dark ? "bg-zinc-600" : "bg-border-strong")} />
         {eyebrow}
       </span>
-      <h2 className={cn("text-3xl sm:text-[2.6rem] sm:leading-[1.1] font-semibold tracking-[-0.03em]", dark ? "text-white" : "text-text-primary")}>{title}</h2>
+      <h2 className={cn("landing-display text-4xl leading-[1.05] sm:text-[3.4rem]", dark ? "text-white" : "text-text-primary")}>{title}</h2>
       {children ? <p className={cn("text-base sm:text-lg leading-relaxed", dark ? "text-zinc-400" : "text-text-secondary")}>{children}</p> : null}
     </Reveal>
   );
@@ -205,6 +253,7 @@ const PHASE_ORDER: HeroPhase[] = ["change", "impact", "fix", "pr"];
 const PHASE_COLOR: Record<HeroPhase, string> = { idle: "#a1a1aa", change: "#60a5fa", impact: "#f59e0b", fix: "#22c55e", pr: "#22c55e" };
 
 function Hero({ data }: { data: LandingData }) {
+  const heroRef = useScrollOut<HTMLElement>();
   const [phase, setPhase] = useState<HeroPhase>("idle");
   const c = data.change;
   const steps: { id: HeroPhase; title: string; detail: string }[] = [
@@ -216,7 +265,7 @@ function Hero({ data }: { data: LandingData }) {
   const activeIdx = PHASE_ORDER.indexOf(phase);
 
   return (
-    <section className="relative isolate lg:min-h-[max(680px,100svh)] overflow-hidden bg-zinc-950 text-white">
+    <section ref={heroRef} className="relative isolate lg:min-h-[max(680px,100svh)] overflow-hidden landing-night bg-zinc-950 text-white">
       {/* Fallback glow while (or if) WebGL loads. */}
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(ellipse_at_70%_60%,#1e293b_0%,#09090b_60%)]" />
       {/* Shade the left side so the words stay easy to read, and fade into the page below. */}
@@ -224,7 +273,7 @@ function Hero({ data }: { data: LandingData }) {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 -z-10 bg-gradient-to-t from-zinc-950 to-transparent" />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 pt-28 lg:pt-32 pb-16 lg:min-h-[max(680px,100svh)] flex flex-col justify-center">
-        <div className="max-w-2xl flex flex-col gap-7">
+        <div className="landing-hero-copy max-w-2xl flex flex-col gap-7">
           <span className="landing-rise inline-flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-zinc-300 backdrop-blur-sm">
             <span className="relative flex size-2">
               <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
@@ -232,11 +281,11 @@ function Hero({ data }: { data: LandingData }) {
             </span>
             Knowledge graph + governed AI agents
           </span>
-          <h1 className="landing-rise [animation-delay:80ms] text-[2.6rem] leading-[1.04] sm:text-6xl lg:text-7xl font-semibold tracking-[-0.045em]">
+          <h1 className="landing-rise landing-display [animation-delay:80ms] text-[3.3rem] leading-[0.98] sm:text-7xl lg:text-[5.9rem]">
             See what a change
             <br />
             will break.{" "}
-            <span className="bg-gradient-to-r from-amber-300 via-emerald-300 to-sky-300 bg-clip-text text-transparent">Then fix it safely.</span>
+            <span className="italic pr-[0.08em] bg-gradient-to-r from-amber-300 via-emerald-300 to-sky-300 bg-clip-text text-transparent">Then fix it safely.</span>
           </h1>
           <p className="landing-rise [animation-delay:160ms] text-lg sm:text-xl leading-relaxed text-zinc-400 max-w-xl">
             SystemDNA maps every file, type and field in your code. Rename one field and it shows every file that must change, in the right order. Then a crew
@@ -261,12 +310,12 @@ function Hero({ data }: { data: LandingData }) {
         </div>
 
         {/* The 3D city: its own block on small screens, behind everything on large ones. */}
-        <div className="relative -mx-4 sm:-mx-6 mt-10 h-[380px] sm:h-[460px] lg:absolute lg:inset-0 lg:m-0 lg:h-auto lg:-z-10">
+        <div className="landing-hero-scene relative -mx-4 sm:-mx-6 mt-10 h-[380px] sm:h-[460px] lg:absolute lg:inset-0 lg:m-0 lg:h-auto lg:-z-10">
           <HeroScene city={data.city} change={c} onPhase={setPhase} className="absolute inset-0" />
         </div>
 
         {/* The story the 3D city is playing, step by step. */}
-        <div className="landing-rise [animation-delay:360ms] mt-4 lg:mt-20 lg:ml-auto w-full lg:w-[440px] rounded-2xl border border-white/10 bg-zinc-950/60 backdrop-blur-md p-4">
+        <div className="landing-hero-card landing-rise [animation-delay:360ms] mt-4 lg:mt-20 lg:ml-auto w-full lg:w-[440px] rounded-2xl border border-white/10 bg-zinc-950/60 backdrop-blur-md p-4">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-zinc-400">
               Replaying a real change on <span className="font-mono text-zinc-200">{data.repo}</span>
@@ -494,7 +543,7 @@ function Dashboard({ data }: { data: LandingData }) {
 function Graph({ data }: { data: LandingData }) {
   const total = data.nodeTypes.reduce((n, t) => n + t.count, 0) || 1;
   return (
-    <section id="graph" className="scroll-mt-20 relative isolate overflow-hidden bg-zinc-950 text-white py-24 sm:py-32">
+    <section id="graph" className="scroll-mt-20 relative isolate overflow-hidden landing-night bg-zinc-950 text-white py-24 sm:py-32">
       <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_75%_50%,rgba(99,102,241,0.14),transparent_60%)]" />
       <div className="absolute inset-0 -z-10 opacity-[0.07] bg-[linear-gradient(to_right,#fff_1px,transparent_1px),linear-gradient(to_bottom,#fff_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
       <div className="mx-auto max-w-7xl px-4 sm:px-6 grid lg:grid-cols-2 gap-12 items-center">
@@ -736,7 +785,7 @@ function CallToAction() {
             <div className="absolute inset-0 -z-10 opacity-[0.1] bg-[linear-gradient(to_right,#fff_1px,transparent_1px),linear-gradient(to_bottom,#fff_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)]" />
             <div className="absolute left-1/2 top-full -z-10 size-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[conic-gradient(from_180deg,#f59e0b,#22c55e,#60a5fa,#f59e0b)] opacity-30 blur-3xl landing-spin" />
             <Waypoints className="mx-auto size-10 text-zinc-500 mb-6" strokeWidth={1.5} />
-            <h2 className="text-3xl sm:text-5xl font-semibold tracking-[-0.035em] text-white max-w-3xl mx-auto">Map your own system in minutes</h2>
+            <h2 className="landing-display text-4xl sm:text-6xl leading-[1.02] text-white max-w-3xl mx-auto">Map your own system in minutes</h2>
             <p className="mt-5 text-lg text-zinc-400 max-w-xl mx-auto">
               Connect a public repository or upload a .zip. You get the knowledge graph, the 3D city and a real impact report straight away.
             </p>
@@ -783,8 +832,9 @@ function Footer() {
 }
 
 export function LandingPage({ data }: { data: LandingData }) {
+  useSmoothScroll();
   return (
-    <div className="flex flex-col bg-background text-text-primary font-sans">
+    <div className={cn(displayFont.variable, "flex flex-col bg-background text-text-primary font-sans")}>
       <LandingNav />
       <main>
         <Hero data={data} />
