@@ -1,0 +1,347 @@
+{
+  "changeId": "chg-012",
+  "change": {
+    "node": "db:column:orders.cust_id",
+    "change": "rename",
+    "to": "customer_id"
+  },
+  "analysisMs": 342,
+  "affected": [
+    {
+      "nodeId": "db:column:orders.cust_id",
+      "layer": "database",
+      "severity": "breaking",
+      "risk": 95,
+      "evidence": {
+        "file": "db/schema.sql",
+        "line": 3
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 1
+    },
+    {
+      "nodeId": "be:field:Order.cust_id",
+      "layer": "backend",
+      "severity": "breaking",
+      "risk": 88,
+      "evidence": {
+        "file": "backend/models.py",
+        "line": 7
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 1
+    },
+    {
+      "nodeId": "pipe:sqlmodel:stg_orders",
+      "layer": "pipelines",
+      "severity": "needs_update",
+      "risk": 72,
+      "evidence": {
+        "file": "transforms/stg_orders.sql",
+        "line": 3
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 2
+    },
+    {
+      "nodeId": "pipe:sqlmodel:dim_customer",
+      "layer": "pipelines",
+      "severity": "breaking",
+      "risk": 80,
+      "evidence": {
+        "file": "transforms/dim_customer.sql",
+        "line": 5
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 2
+    },
+    {
+      "nodeId": "pipe:sparkjob:churn_job",
+      "layer": "pipelines",
+      "severity": "breaking",
+      "risk": 65,
+      "evidence": {
+        "file": "pipelines/churn_job.py",
+        "line": 5
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 2
+    },
+    {
+      "nodeId": "pipe:sparkjob:export_job",
+      "layer": "pipelines",
+      "severity": "breaking",
+      "risk": 55,
+      "evidence": {
+        "file": "pipelines/export_job.py",
+        "line": 3
+      },
+      "confidence": "medium",
+      "checkThis": true,
+      "wave": 2
+    },
+    {
+      "nodeId": "be:field:OrderOut.cust_id",
+      "layer": "backend",
+      "severity": "breaking",
+      "risk": 82,
+      "evidence": {
+        "file": "backend/schemas.py",
+        "line": 6
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 2
+    },
+    {
+      "nodeId": "api:endpoint:GET /api/orders",
+      "layer": "api",
+      "severity": "breaking",
+      "risk": 75,
+      "evidence": {
+        "file": "backend/routes.py",
+        "line": 10
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 3
+    },
+    {
+      "nodeId": "api:endpoint:GET /api/customers/{id}/orders",
+      "layer": "api",
+      "severity": "breaking",
+      "risk": 75,
+      "evidence": {
+        "file": "backend/routes.py",
+        "line": 18
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 3
+    },
+    {
+      "nodeId": "fe:tsfield:Order.cust_id",
+      "layer": "frontend",
+      "severity": "breaking",
+      "risk": 70,
+      "evidence": {
+        "file": "frontend/src/types.ts",
+        "line": 2
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 3
+    },
+    {
+      "nodeId": "fe:component:OrdersTable",
+      "layer": "frontend",
+      "severity": "breaking",
+      "risk": 68,
+      "evidence": {
+        "file": "frontend/src/OrdersTable.tsx",
+        "line": 10
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 4
+    },
+    {
+      "nodeId": "dash:dashboard:revenue",
+      "layer": "dashboards",
+      "severity": "needs_update",
+      "risk": 45,
+      "evidence": {
+        "file": "dashboards/revenue.yaml",
+        "line": 4
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 4
+    },
+    {
+      "nodeId": "test:test:test_routes",
+      "layer": "tests_docs",
+      "severity": "update",
+      "risk": 30,
+      "evidence": {
+        "file": "tests/test_routes.py",
+        "line": 10
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 4
+    },
+    {
+      "nodeId": "test:test:test_transforms",
+      "layer": "tests_docs",
+      "severity": "update",
+      "risk": 30,
+      "evidence": {
+        "file": "tests/test_transforms.py",
+        "line": 8
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 4
+    },
+    {
+      "nodeId": "test:test:OrdersTable.test",
+      "layer": "tests_docs",
+      "severity": "update",
+      "risk": 28,
+      "evidence": {
+        "file": "tests/OrdersTable.test.tsx",
+        "line": 5
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 4
+    },
+    {
+      "nodeId": "doc:doc:adr-003",
+      "layer": "tests_docs",
+      "severity": "update",
+      "risk": 18,
+      "evidence": {
+        "file": "docs/adr-003-customer-model.md",
+        "line": 14
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 4
+    },
+    {
+      "nodeId": "pipe:sqlmodel:fct_revenue",
+      "layer": "pipelines",
+      "severity": "safe",
+      "risk": 10,
+      "evidence": {
+        "file": "transforms/fct_revenue.sql",
+        "line": 4
+      },
+      "confidence": "high",
+      "checkThis": false,
+      "wave": 2
+    }
+  ],
+  "businessProcesses": [
+    {
+      "nodeId": "biz:businessprocess:monthly_revenue_close",
+      "name": "Monthly Revenue Close",
+      "owner": "Finance"
+    }
+  ],
+  "waves": [
+    {
+      "wave": 1,
+      "nodeIds": [
+        "db:column:orders.cust_id",
+        "be:field:Order.cust_id"
+      ],
+      "agentCount": 2
+    },
+    {
+      "wave": 2,
+      "nodeIds": [
+        "pipe:sqlmodel:stg_orders",
+        "pipe:sqlmodel:dim_customer",
+        "pipe:sparkjob:churn_job",
+        "pipe:sparkjob:export_job",
+        "be:field:OrderOut.cust_id"
+      ],
+      "agentCount": 5
+    },
+    {
+      "wave": 3,
+      "nodeIds": [
+        "api:endpoint:GET /api/orders",
+        "api:endpoint:GET /api/customers/{id}/orders",
+        "fe:tsfield:Order.cust_id"
+      ],
+      "agentCount": 3
+    },
+    {
+      "wave": 4,
+      "nodeIds": [
+        "fe:component:OrdersTable",
+        "dash:dashboard:revenue",
+        "test:test:test_routes",
+        "test:test:test_transforms",
+        "test:test:OrdersTable.test",
+        "doc:doc:adr-003"
+      ],
+      "agentCount": 6
+    }
+  ],
+  "approvals": [
+    {
+      "nodeId": "db:column:orders.cust_id",
+      "reason": "database"
+    },
+    {
+      "nodeId": "pipe:sqlmodel:dim_customer",
+      "reason": "pii"
+    }
+  ],
+  "grep": {
+    "term": "cust_id",
+    "scope": "*.py, *.sql",
+    "foundNodeIds": [
+      "db:column:orders.cust_id",
+      "be:field:Order.cust_id",
+      "be:field:OrderOut.cust_id",
+      "pipe:sqlmodel:stg_orders",
+      "pipe:sqlmodel:dim_customer",
+      "pipe:sparkjob:churn_job",
+      "test:test:test_routes",
+      "test:test:test_transforms"
+    ],
+    "missed": [
+      {
+        "nodeId": "pipe:column:stg_orders.customer_key",
+        "reason": "alias_chain"
+      },
+      {
+        "nodeId": "pipe:sqlmodel:fct_revenue",
+        "reason": "alias_chain"
+      },
+      {
+        "nodeId": "dash:dashboard:revenue",
+        "reason": "alias_chain"
+      },
+      {
+        "nodeId": "pipe:sparkjob:export_job",
+        "reason": "dynamic_sql"
+      },
+      {
+        "nodeId": "fe:tsfield:Order.cust_id",
+        "reason": "cross_language"
+      },
+      {
+        "nodeId": "fe:component:OrdersTable",
+        "reason": "cross_language"
+      },
+      {
+        "nodeId": "test:test:OrdersTable.test",
+        "reason": "cross_language"
+      },
+      {
+        "nodeId": "api:endpoint:GET /api/orders",
+        "reason": "no_literal_reference"
+      },
+      {
+        "nodeId": "api:endpoint:GET /api/customers/{id}/orders",
+        "reason": "no_literal_reference"
+      },
+      {
+        "nodeId": "doc:doc:adr-003",
+        "reason": "no_literal_reference"
+      }
+    ]
+  }
+}
