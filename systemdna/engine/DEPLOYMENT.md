@@ -1,34 +1,34 @@
-# SystemDNA Engine — EC2 Deployment Guide
+﻿# SystemDNA Engine  EC2 Deployment Guide
 
 > **Ground truth:** This guide is written against the **actual files in this repo**.
 > Every command references a file that exists. Nothing is invented.
 >
 > **What is real today (per `systemdna/STATUS.md`):**
-> - Frontend (Next.js) + TypeScript scanner (`ts-scan.mjs`) — fully working on `master`
-> - FastAPI server stub (`server/app.py`) + Docker Compose (`docker-compose.yml`) — exists on `arnav/agent-engine`
-> - Bob integration, orchestrator, Python scanners, AWS infra — **not yet built**
+> - Frontend (Next.js) + TypeScript scanner (`ts-scan.mjs`)  fully working on `master`
+> - FastAPI server stub (`server/app.py`) + Docker Compose (`docker-compose.yml`)  exists on `arnav/agent-engine`
+> - Bob integration, orchestrator, Python scanners, AWS infra  **not yet built**
 >
 > This guide covers what you do **right now** to get the engine running on EC2,
 > and flags clearly what still needs to be built before the demo.
 
 ---
 
-## ⚡ Reality Check Before You Start
+## Reality Check Before You Start
 
 | Component | Status | Blocker if missing |
 |---|---|---|
-| `systemdna/engine/docker-compose.yml` | ✅ EXISTS | — |
-| `systemdna/engine/Dockerfile` | ✅ EXISTS | — |
-| `systemdna/engine/requirements.txt` | ✅ EXISTS | — |
-| `systemdna/engine/server/app.py` | ✅ EXISTS | — |
-| `systemdna/engine/deploy/bootstrap.sh` | ✅ EXISTS | — |
-| `systemdna/engine/deploy/deploy.sh` | ✅ EXISTS | — |
-| `systemdna/engine/hooks/permit_check.py` | ✅ EXISTS | — |
-| `systemdna/engine/hooks/report.py` | ✅ EXISTS | — |
-| Python scanners (python_scan, sql_scan) | ❌ NOT BUILT | Graph will be empty |
-| Orchestrator | ❌ NOT BUILT | Agent waves won't run |
-| Bob modes + Skill | ❌ NOT BUILT | Bob IDE can't drive changes |
-| AWS infra (VPC, ALB, S3, DynamoDB) | ❌ NOT BUILT | No public URL |
+| `systemdna/engine/docker-compose.yml` | EXISTS |  |
+| `systemdna/engine/Dockerfile` | EXISTS |  |
+| `systemdna/engine/requirements.txt` | EXISTS |  |
+| `systemdna/engine/server/app.py` | EXISTS |  |
+| `systemdna/engine/deploy/bootstrap.sh` | EXISTS |  |
+| `systemdna/engine/deploy/deploy.sh` | EXISTS |  |
+| `systemdna/engine/hooks/permit_check.py` | EXISTS |  |
+| `systemdna/engine/hooks/report.py` | EXISTS |  |
+| Python scanners (python_scan, sql_scan) | NOT BUILT | Graph will be empty |
+| Orchestrator | NOT BUILT | Agent waves won't run |
+| Bob modes + Skill | NOT BUILT | Bob IDE can't drive changes |
+| AWS infra (VPC, ALB, S3, DynamoDB) | NOT BUILT | No public URL |
 
 **Minimum viable demo path (28 hours):**
 You can deploy the API + Neo4j + Redis + Chroma stack to EC2 and point the existing
@@ -37,7 +37,7 @@ when `NEXT_PUBLIC_API_URL` is set. Build scanners + orchestrator while the infra
 
 ---
 
-## Phase 0 — Prerequisites (your laptop, 30 minutes)
+## Phase 0  Prerequisites (your laptop, 30 minutes)
 
 ### 0.1 Tools you need
 
@@ -56,10 +56,10 @@ node --version         # For the frontend build (Node 18+)
 | Secret | Where to get it | Used by |
 |---|---|---|
 | `GEMINI_API_KEY` | https://aistudio.google.com | AG2 Cartographer, Fixer, Inspector agents |
-| `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Fine-grained tokens → Contents + PRs: Read/write | PR creation |
+| `GITHUB_TOKEN` | GitHub  Settings  Developer settings  Fine-grained tokens  Contents + PRs: Read/write | PR creation |
 | `DEMO_TOKEN` | Make any strong random string (e.g. `sysdt-demo-2026`) | Protect write endpoints |
 | AWS account + region | Your AWS console | Everything |
-| EC2 key pair `.pem` | AWS Console → EC2 → Key Pairs → Create | SSH access |
+| EC2 key pair `.pem` | AWS Console  EC2  Key Pairs  Create | SSH access |
 
 ### 0.3 Create your `.env` file now (never commit this)
 
@@ -96,7 +96,7 @@ git check-ignore -v systemdna/engine/.env
 
 ---
 
-## Phase 1 — Provision the EC2 Instance (AWS Console or CLI)
+## Phase 1  Provision the EC2 Instance (AWS Console or CLI)
 
 ### 1.1 Launch the instance
 
@@ -147,7 +147,7 @@ Create a role named `systemdna-ec2-role` with these permissions and attach it:
 
 ---
 
-## Phase 2 — Run bootstrap.sh on the EC2 Host
+## Phase 2  Run bootstrap.sh on the EC2 Host
 
 ### 2.1 SSH in and run the existing bootstrap script
 
@@ -155,7 +155,7 @@ Create a role named `systemdna-ec2-role` with these permissions and attach it:
 # From your laptop:
 ssh -i your-key.pem ubuntu@<EC2-PUBLIC-IP>
 
-# On the EC2 host — run bootstrap.sh from the repo:
+# On the EC2 host  run bootstrap.sh from the repo:
 # The script (deploy/bootstrap.sh) does:
 #   1. apt-get install docker.io docker-compose-plugin
 #   2. systemctl enable + start docker
@@ -189,9 +189,9 @@ echo "hello" | bob -p "just say hi back" --max-turns 1
 
 ---
 
-## Phase 3 — Copy Secrets to EC2
+## Phase 3  Copy Secrets to EC2
 
-**From your laptop** — copy the `.env` file you created in Phase 0:
+**From your laptop**  copy the `.env` file you created in Phase 0:
 
 ```bash
 scp -i your-key.pem \
@@ -219,7 +219,7 @@ ssh -i your-key.pem ubuntu@<EC2-IP> \
 
 ---
 
-## Phase 4 — Start All 6 Docker Containers
+## Phase 4  Start All 6 Docker Containers
 
 The `docker-compose.yml` that exists in `systemdna/engine/` defines 6 services:
 
@@ -249,7 +249,7 @@ docker compose logs -f --tail=50
 docker compose ps
 ```
 
-Expected — all `running` or `healthy`:
+Expected  all `running` or `healthy`:
 ```
 NAME       STATUS           PORTS
 neo4j      healthy          0.0.0.0:7474->7474/tcp, 0.0.0.0:7687->7687/tcp
@@ -268,20 +268,20 @@ docker compose restart <service-name>
 
 ---
 
-## Phase 5 — Smoke Tests (verify API is alive)
+## Phase 5  Smoke Tests (verify API is alive)
 
 Run these from the EC2 host itself first, then from your laptop after the ALB is up.
 
 ```bash
-# Test 1 — API health
+# Test 1  API health
 curl -s http://localhost:8080/health
 # Expected: {"status":"ok"}
 
-# Test 2 — Graph endpoint (empty graph is fine at this stage)
+# Test 2  Graph endpoint (empty graph is fine at this stage)
 curl -s http://localhost:8080/graph | python3 -m json.tool | head -20
 # Expected: valid JSON with nodes:[] and edges:[] until scanners are built
 
-# Test 3 — Impact analysis (uses the real ImpactEngine once scanners produce a graph)
+# Test 3  Impact analysis (uses the real ImpactEngine once scanners produce a graph)
 curl -s -X POST http://localhost:8080/changes \
   -H "Authorization: Bearer sysdt-demo-2026" \
   -H "Content-Type: application/json" \
@@ -289,19 +289,19 @@ curl -s -X POST http://localhost:8080/changes \
   | python3 -m json.tool
 # Expected: {"change_id":"chg-...","report":{...}}
 
-# Test 4 — WebSocket (keep-alive ping test)
+# Test 4  WebSocket (keep-alive ping test)
 # Install wscat: npm install -g wscat
 wscat -c ws://localhost:8080/ws
 # Should connect. Type anything, connection stays open.
 
-# Test 5 — MCP health
+# Test 5  MCP health
 curl -s http://localhost:3000/health
 # Expected: {"status":"ok"} or similar
 ```
 
 ---
 
-## Phase 6 — Set Up ShopFlow on EC2
+## Phase 6  Set Up ShopFlow on EC2
 
 ShopFlow is the sample repo that the demo runs against. Until FDE2 builds the real
 ShopFlow, use the test fixtures:
@@ -320,37 +320,37 @@ grep REPO_WORKSPACE /app/systemdna/engine/.env
 
 ---
 
-## Phase 7 — Build the AWS Network (CP1 — Hours 1–10)
+## Phase 7  Build the AWS Network (CP1  Hours 110)
 
-> **This phase needs to happen in parallel with Phases 1–6.**
+> **This phase needs to happen in parallel with Phases 16.**
 > CP1 owns this. The engine team can use a direct EC2 IP temporarily.
 
 ### 7.1 What to build
 
 ```
 AWS Region (e.g. us-east-1)
-│
-├── VPC: 10.0.0.0/16
-│   ├── Public Subnet A (10.0.1.0/24) ─── ALB node 1
-│   ├── Public Subnet B (10.0.2.0/24) ─── ALB node 2
-│   └── Private Subnet  (10.0.3.0/24) ─── EC2 engine host
-│
-├── Application Load Balancer (ALB)
-│   └── ACM Certificate (HTTPS :443)
-│       ├── /api/*     → EC2:8080 (FastAPI)
-│       ├── /ws        → EC2:8080 (WebSocket — set idle timeout to 3600s)
-│       ├── /mcp/*     → EC2:3000 (FastMCP)
-│       ├── /events    → EC2:8080
-│       └── /*         → CloudFront (dashboard)
-│
-├── S3 Bucket: systemdna-dashboard   (CloudFront origin, static site)
-├── S3 Bucket: systemdna-artifacts   (graph.json, replays, reports — versioning ON)
-├── CloudFront Distribution          (HTTPS for dashboard)
-├── DynamoDB Table: systemdna-events (key: change_id, sort: ts, on-demand)
-├── Secrets Manager                  (systemdna/gemini, systemdna/github, systemdna/demo)
-├── CloudWatch Log Groups            (one per container: /systemdna/api, /systemdna/mcp, etc.)
-├── AWS Budgets Alert                (CREATE THIS FIRST — at $20 threshold)
-└── ECR Repository: systemdna-engine (Docker images)
+
+ VPC: 10.0.0.0/16
+    Public Subnet A (10.0.1.0/24)  ALB node 1
+    Public Subnet B (10.0.2.0/24)  ALB node 2
+    Private Subnet  (10.0.3.0/24)  EC2 engine host
+
+ Application Load Balancer (ALB)
+    ACM Certificate (HTTPS :443)
+        /api/*      EC2:8080 (FastAPI)
+        /ws         EC2:8080 (WebSocket  set idle timeout to 3600s)
+        /mcp/*      EC2:3000 (FastMCP)
+        /events     EC2:8080
+        /*          CloudFront (dashboard)
+
+ S3 Bucket: systemdna-dashboard   (CloudFront origin, static site)
+ S3 Bucket: systemdna-artifacts   (graph.json, replays, reports  versioning ON)
+ CloudFront Distribution          (HTTPS for dashboard)
+ DynamoDB Table: systemdna-events (key: change_id, sort: ts, on-demand)
+ Secrets Manager                  (systemdna/gemini, systemdna/github, systemdna/demo)
+ CloudWatch Log Groups            (one per container: /systemdna/api, /systemdna/mcp, etc.)
+ AWS Budgets Alert                (CREATE THIS FIRST  at $20 threshold)
+ ECR Repository: systemdna-engine (Docker images)
 ```
 
 ### 7.2 Critical ALB WebSocket setting
@@ -366,7 +366,7 @@ aws elbv2 modify-load-balancer-attributes \
 
 ---
 
-## Phase 8 — Deploy the Frontend to S3 + CloudFront
+## Phase 8  Deploy the Frontend to S3 + CloudFront
 
 The frontend lives in `systemdna/web/` on `master`. It switches from demo to live
 mode automatically when `NEXT_PUBLIC_API_URL` is set.
@@ -394,11 +394,11 @@ aws cloudfront create-invalidation \
 
 ---
 
-## Phase 9 — CI/CD Pipeline (CP1 — Hours 10–14)
+## Phase 9  CI/CD Pipeline (CP1  Hours 1014)
 
 The `.github/workflows/` directory needs these jobs. Build them in this order:
 
-### 9.1 Secret scan (build this FIRST — IBM disables accounts that leak keys)
+### 9.1 Secret scan (build this FIRST  IBM disables accounts that leak keys)
 
 ```yaml
 # .github/workflows/secret-scan.yml
@@ -432,7 +432,7 @@ make teardown  # removes all AWS resources after judging
 
 ---
 
-## Phase 10 — Connect `NEXT_PUBLIC_API_URL` and Verify Live Mode
+## Phase 10  Connect `NEXT_PUBLIC_API_URL` and Verify Live Mode
 
 Once the ALB is up and the API is healthy:
 
@@ -447,11 +447,11 @@ aws cloudfront create-invalidation --distribution-id YOUR_ID --paths "/*"
 
 Open the dashboard in a browser. The `STATUS.md` says the frontend switches from
 `lib/simulator.ts` (demo mode) to live WebSocket mode when `NEXT_PUBLIC_API_URL` is
-set and `change.mode === "live"` — which the API already sets in `server/app.py`.
+set and `change.mode === "live"`  which the API already sets in `server/app.py`.
 
 ---
 
-## Phase 11 — Full End-to-End Verification Checklist
+## Phase 11  Full End-to-End Verification Checklist
 
 Run this before the demo. Every line must pass.
 
@@ -486,26 +486,26 @@ curl -s -X POST http://<EC2-IP>:8080/events \
 # 6. Bob hooks fire (needs Bob Shell installed)
 echo '{"event":"PreToolUse","tool":"write_to_file","tool_input":{"path":"transforms/stg_orders.sql"}}' \
   | SYSTEMDNA_AGENT_ID=fix-test python systemdna/engine/hooks/permit_check.py
-# Expected: exits 0 (or 2 if file not in permit — that means the hook works)
+# Expected: exits 0 (or 2 if file not in permit  that means the hook works)
 
 # 7. Out-of-permit edit is blocked
 echo '{"event":"PreToolUse","tool":"write_to_file","tool_input":{"path":"backend/routes.py"}}' \
   | SYSTEMDNA_AGENT_ID=fix-stg-orders python systemdna/engine/hooks/permit_check.py
-echo $?   # Must be 2 — BLOCKED
+echo $?   # Must be 2  BLOCKED
 
 # 8. Re-scan shows 0 dangling refs (after all waves complete)
 curl -s http://<EC2-IP>:8080/changes/<change_id>/diff
 # Target: {"before": N, "after": 0}
 
 # 9. Dashboard shows live data
-# Open browser → https://your-cloudfront-domain
+# Open browser  https://your-cloudfront-domain
 # Agent City map must show real nodes (not the simulator)
 # KPI tile must show "Dangling references: 0" at end of run
 ```
 
 ---
 
-## Phase 12 — Tear Down After Judging
+## Phase 12  Tear Down After Judging
 
 ```bash
 # Stop containers on EC2
@@ -530,8 +530,8 @@ aws dynamodb list-tables | grep systemdna
 
 | Service | Port | Accessible from |
 |---|---|---|
-| FastAPI (REST + WS) | 8080 | ALB → public; EC2 internal |
-| FastMCP | 3000 | ALB → public; EC2 internal |
+| FastAPI (REST + WS) | 8080 | ALB  public; EC2 internal |
+| FastMCP | 3000 | ALB  public; EC2 internal |
 | Neo4j browser | 7474 | EC2 internal only (never expose publicly) |
 | Neo4j bolt | 7687 | EC2 internal only |
 | ChromaDB | 8000 | EC2 internal only |
@@ -568,6 +568,6 @@ aws dynamodb list-tables | grep systemdna
 | WebSocket disconnects after 60s | ALB idle timeout too low | Set ALB idle timeout to 3600s |
 | `bob -p` hangs | Bob Shell not signed in | Run `bob login` on the EC2 host |
 | `permit_check.py` exits 0 for everything | No permit file found | Orchestrator must write `.systemdna/permits/<agent_id>.json` first |
-| Graph returns 0 nodes | Scanners not built yet | Expected — build FDE1's scanners |
+| Graph returns 0 nodes | Scanners not built yet | Expected  build FDE1's scanners |
 | Frontend shows simulated data | `NEXT_PUBLIC_API_URL` not set | Set it in `systemdna/web/.env.local` and rebuild |
 | Deploy fails: ECR login error | Wrong region or ECR_REPO var | Check `AWS_REGION` and `ECR_REPO` in `deploy.sh` |
