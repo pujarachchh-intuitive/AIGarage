@@ -10,8 +10,9 @@
 //   6. Push      a new branch systemdna/<change> (never the default branch)
 //   7. PR        a DRAFT pull request with the impact report as its description
 //
-// The GitHub token comes only from the server environment (GITHUB_TOKEN). It is
-// sent as an HTTP header, never put in a URL, a git remote or a log line.
+// Credentials come from lib/server/github-auth.ts: a 1-hour GitHub App token for
+// this one repo, or GITHUB_TOKEN when no app is set up. The token is sent as an
+// HTTP header, never put in a URL, a git remote or a log line.
 
 import "server-only";
 import path from "node:path";
@@ -19,6 +20,7 @@ import { existsSync } from "node:fs";
 import { LIMITS, run, validateGitInput, withWorkspace } from "@/lib/server/ingest";
 import { listRepos, getRepo } from "@/lib/server/graph-store";
 import { computeImpact } from "@/lib/impact";
+import { credentialsFor, githubApi, githubMode, scrub } from "@/lib/server/github-auth";
 
 export type AgentEvent =
   | { type: "progress"; step: string; detail: string }
@@ -106,63 +108,20 @@ function graphImpactMarkdown(
 
 const MAX_DIFF = 200_000;
 
-function token() {
-  return process.env.GITHUB_TOKEN?.trim() || "";
-}
-
 /** git -c option that sends the token as a header for github.com only. */
-function authConfig(): string[] {
-  const t = token();
-  if (!t) return [];
-  const basic = Buffer.from(`x-access-token:${t}`).toString("base64");
+function authConfig(token: string | undefined): string[] {
+  if (!token) return [];
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
   return ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`];
 }
 
-/** Never let the token reach a message. */
-function scrub(message: string) {
-  const t = token();
-  let out = message;
-  if (t) out = out.split(t).join("***");
-  return out.replace(/AUTHORIZATION: basic [A-Za-z0-9+/=]+/gi, "AUTHORIZATION: ***");
-}
-
-function ownerRepo(url: string) {
+export function ownerRepo(url: string) {
   const m = url.match(/^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(\.git)?\/?$/);
   return m ? { owner: m[1], repo: m[2] } : null;
 }
 
-async function github<T>(pathname: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`https://api.github.com${pathname}`, {
-    ...init,
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token()}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "SystemDNA-agent",
-      ...init?.headers,
-    },
-  });
-  const body = (await res.json().catch(() => ({}))) as T & { message?: string; errors?: { message?: string }[] };
-  if (!res.ok) {
-    const detail = body.errors?.map((e) => e.message).filter(Boolean).join("; ");
-    throw new Error(`GitHub ${res.status}: ${body.message ?? "request failed"}${detail ? ` (${detail})` : ""}`);
-  }
-  return body;
-}
-
-/** Is a token configured, and whose is it? Never returns the token. */
-export async function githubStatus(): Promise<{ configured: boolean; login?: string; error?: string }> {
-  if (!token()) return { configured: false };
-  try {
-    const me = await github<{ login: string }>("/user");
-    return { configured: true, login: me.login };
-  } catch (err) {
-    return { configured: true, error: err instanceof Error ? scrub(err.message) : "Token check failed" };
-  }
-}
-
 function renamePath() {
-  const scanner = process.env.SYSTEMDNA_SCANNER ?? path.resolve(/*turbopackIgnore: true*/ process.cwd(), "../core/scanner/ts-scan.mjs");
+  const scanner = process.env.SYSTEMDNA_SCANNER || path.resolve(/*turbopackIgnore: true*/ process.cwd(), "../core/scanner/ts-scan.mjs");
   return path.join(/*turbopackIgnore: true*/ path.dirname(scanner), "ts-rename.mjs");
 }
 
@@ -173,7 +132,12 @@ export async function runPullRequest(input: PullRequestInput, emit: Emit) {
   if (!target) throw new Error("The GitHub agent works with github.com repositories today.");
   if (!/^[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*$/.test(input.field)) throw new Error("Only renames of a TypeScript field (Type.field) are supported today.");
   if (!/^[A-Za-z_$][\w$]*$/.test(input.to)) throw new Error("The new name must be a valid identifier.");
-  if (!input.dryRun && !token()) throw new Error("Set GITHUB_TOKEN on the server to open pull requests.");
+  if (!input.dryRun && githubMode() === "none") throw new Error("Set up the GitHub App (GITHUB_APP_ID and private key) or GITHUB_TOKEN on the server to open pull requests.");
+  // Private repos need a token even to clone. For a preview without one, clone anonymously.
+  const creds = await credentialsFor(target.owner, target.repo).catch((e: Error) => {
+    if (input.dryRun) return null;
+    throw e;
+  });
   const renameScript = renamePath();
   if (!existsSync(renameScript)) throw new Error(`Rename agent not found at ${renameScript}.`);
 
@@ -202,7 +166,7 @@ export async function runPullRequest(input: PullRequestInput, emit: Emit) {
   return withWorkspace(async (dir) => {
     // 1. Clone.
     emit({ type: "progress", step: "clone", detail: `Cloning ${target.owner}/${target.repo}` });
-    const cloneArgs = [...authConfig(), "-c", "protocol.file.allow=never", "-c", "core.symlinks=false", "clone", "--depth", "1", "--single-branch", "--no-tags", "--quiet"];
+    const cloneArgs = [...authConfig(creds?.token), "-c", "protocol.file.allow=never", "-c", "core.symlinks=false", "clone", "--depth", "1", "--single-branch", "--no-tags", "--quiet"];
     if (input.ref) cloneArgs.push("--branch", input.ref);
     cloneArgs.push("--", input.url, dir);
     await run("git", cloneArgs, { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1" } }).catch((e: Error) => {
@@ -258,8 +222,9 @@ export async function runPullRequest(input: PullRequestInput, emit: Emit) {
     // 5. Branch, commit, push. Never the default branch.
     const branch = `systemdna/${input.changeId}-${input.field.split(".")[1]}-to-${input.to}`.toLowerCase().replace(/[^a-z0-9/_-]+/g, "-").slice(0, 100);
     emit({ type: "progress", step: "push", detail: `Pushing branch ${branch}` });
-    const repoInfo = await github<{ default_branch: string; permissions?: { push?: boolean } }>(`/repos/${target.owner}/${target.repo}`);
-    if (repoInfo.permissions && !repoInfo.permissions.push) {
+    if (!creds) throw new Error("No GitHub credentials for this repo.");
+    const repoInfo = await githubApi<{ default_branch: string; permissions?: { push?: boolean } }>(creds.token, `/repos/${target.owner}/${target.repo}`);
+    if (creds.mode === "token" && repoInfo.permissions && !repoInfo.permissions.push) {
       throw new Error(`The token cannot push to ${target.owner}/${target.repo}. Give it Contents: write, or fork the repo and connect the fork.`);
     }
     const base = input.ref || repoInfo.default_branch;
@@ -269,20 +234,20 @@ export async function runPullRequest(input: PullRequestInput, emit: Emit) {
     await git(["checkout", "-b", branch]);
     await git(["add", "-A"]);
     await git([
-      "-c", "user.name=SystemDNA Agent",
-      "-c", "user.email=agent@systemdna.dev",
+      "-c", `user.name=${creds.author.name}`,
+      "-c", `user.email=${creds.author.email}`,
       "commit", "--quiet", "--no-verify",
       "-m", input.title,
       "-m", `Rename ${input.field} to ${input.to} across ${result.files.length} code files and ${result.docs.length} docs.\nMade by the SystemDNA GitHub agent with the TypeScript compiler's rename. No new type errors.`,
     ]);
-    await run("git", [...authConfig(), "-C", dir, "push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0" } }).catch((e: Error) => {
+    await run("git", [...authConfig(creds.token), "-C", dir, "push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0" } }).catch((e: Error) => {
       throw new Error(scrub(e.message));
     });
 
     // 7. Draft pull request.
     emit({ type: "progress", step: "pr", detail: "Opening a draft pull request" });
     const fullBody = (input.body + graphImpact).slice(0, 60_000);
-    const pr = await github<{ html_url: string; number: number }>(`/repos/${target.owner}/${target.repo}/pulls`, {
+    const pr = await githubApi<{ html_url: string; number: number }>(creds.token, `/repos/${target.owner}/${target.repo}/pulls`, {
       method: "POST",
       body: JSON.stringify({ title: input.title, head: branch, base, body: fullBody, draft: true }),
     });

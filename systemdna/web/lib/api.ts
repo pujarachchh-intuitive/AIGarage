@@ -5,7 +5,7 @@
 
 import { computeImpact } from "@/lib/impact";
 import marketplaceGraph from "@/lib/mock/marketplace-dashboard.graph.json";
-import type { AgentEvent, ChangeRequest, ConnectedRepo, DataMode, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
+import type { AgentEvent, ChangeRequest, ConnectedRepo, DataMode, GithubStatus, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
 export const DATA_MODE: DataMode = API_URL ? "live" : "demo";
@@ -188,9 +188,11 @@ export function subscribeEvents(
 // GitHub agent (app/api/github).
 // ---------------------------------------------------------------------------
 
-export async function fetchGithubStatus(): Promise<{ configured: boolean; login?: string; error?: string }> {
-  const res = await fetch("/api/github/status", { cache: "no-store" });
-  return res.ok ? res.json() : { configured: false, error: `Status check failed (${res.status})` };
+/** GitHub App or token status. Pass a repo URL to also learn whether the app is installed there. */
+export async function fetchGithubStatus(repoUrl?: string): Promise<GithubStatus> {
+  const qs = repoUrl ? `?repo=${encodeURIComponent(repoUrl)}` : "";
+  const res = await fetch(`/api/github/status${qs}`, { cache: "no-store" });
+  return res.ok ? res.json() : { configured: false, mode: "none", error: `Status check failed (${res.status})` };
 }
 
 export interface AgentRequest {

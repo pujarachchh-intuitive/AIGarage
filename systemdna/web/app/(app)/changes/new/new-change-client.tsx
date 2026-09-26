@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, Play, RotateCcw, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Loader2, Play, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { CityLegend } from "@/components/city/city-legend";
 import { CityMap } from "@/components/city/city-map";
@@ -18,7 +18,7 @@ import { analyseChange, DATA_MODE, demoRepo, runChange } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { shortName } from "@/lib/impact";
 import { useApp } from "@/lib/store";
-import type { ChangeKind, ImpactReport, Severity } from "@/lib/types";
+import type { ChangeKind, Graph, ImpactReport, Severity } from "@/lib/types";
 
 const RENAMEABLE = new Set(["Column", "Field", "TSField"]);
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -28,6 +28,48 @@ const KINDS: { id: ChangeKind; label: string; enabled: boolean }[] = [
   { id: "type_change", label: "Change type", enabled: false },
   { id: "delete", label: "Delete", enabled: false },
 ];
+
+/** How long the "AI is working" scan plays at least. The real analysis takes a few ms. */
+const SCAN_MS = 2600;
+
+/** The analysis, told as steps that tick off while the map scan plays. */
+function AnalysisSteps({ graph, field }: { graph: Graph; field: string }) {
+  const steps = [
+    `Load the knowledge graph (${graph.nodes.length} components, ${graph.edges.length} links)`,
+    `Find every reference to ${field}`,
+    "Follow imports, types, string keys and docs",
+    "Score the risk and plan fix waves",
+  ];
+  const [done, setDone] = useState(0);
+  useEffect(() => {
+    const step = SCAN_MS / steps.length;
+    const timers = steps.map((_, i) => setTimeout(() => setDone(i + 1), step * (i + 1) - 120));
+    return () => timers.forEach(clearTimeout);
+    // The steps only depend on how many there are.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <ol className="flex flex-col gap-2 px-3.5 py-3 rounded-xl border border-border bg-surface-secondary animate-in fade-in slide-in-from-top-1 duration-300">
+      {steps.map((text, i) => {
+        const state = i < done ? "done" : i === done ? "active" : "waiting";
+        return (
+          <li key={i} className={cn("flex items-start gap-2 text-body transition-colors duration-300", state === "waiting" ? "text-text-tertiary" : "text-text-primary")}>
+            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+              {state === "done" ? (
+                <Check className="size-4 text-success animate-in zoom-in duration-200" />
+              ) : state === "active" ? (
+                <Loader2 className="size-4 text-info animate-spin" />
+              ) : (
+                <span className="size-1.5 rounded-full bg-border-strong" />
+              )}
+            </span>
+            <span className={cn(state === "active" && "font-semibold")}>{text}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export function NewChangeClient() {
   const router = useRouter();
@@ -47,6 +89,8 @@ export function NewChangeClient() {
   const nodeId = picked && graph?.nodes.some((n) => n.id === picked) ? picked : defaults.node;
   const to = typed ?? (nodeId === defaults.node ? defaults.to : "");
   const [busy, setBusy] = useState(false);
+  // The node the AI scan starts from while the analysis runs.
+  const [scanning, setScanning] = useState<string | null>(null);
   const [result, setResult] = useState<{ report: ImpactReport; changeId?: string } | null>(null);
   const [rippleKey, setRippleKey] = useState(0);
 
@@ -78,13 +122,21 @@ export function NewChangeClient() {
   const analyse = async () => {
     if (!graph || !node || nameError) return;
     setBusy(true);
+    setResult(null);
+    setScanning(node.id);
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     try {
-      const res = await analyseChange(graph, { node: node.id, change: kind, to });
+      // Let the scan play out, so the user sees the AI walk the graph.
+      const [res] = await Promise.all([
+        analyseChange(graph, { node: node.id, change: kind, to }),
+        new Promise((r) => setTimeout(r, reduced ? 0 : SCAN_MS)),
+      ]);
       setResult(res);
       setRippleKey((k) => k + 1);
     } catch (err) {
       toast.error("Impact analysis failed", { description: err instanceof Error ? err.message : undefined });
     } finally {
+      setScanning(null);
       setBusy(false);
     }
   };
@@ -199,10 +251,11 @@ export function NewChangeClient() {
               </span>
             </label>
 
-            <button className={cn(primaryButton, "justify-center")} disabled={!graph || !!nameError || busy} onClick={analyse}>
-              <Sparkles />
-              {busy ? "Analysing…" : "Analyse impact"}
+            <button className={cn(primaryButton, "justify-center", busy && "ai-working disabled:opacity-100")} disabled={!graph || !!nameError || busy} onClick={analyse}>
+              <Sparkles className={cn(busy && "animate-pulse")} />
+              {busy ? "AI is analysing the impact…" : "Analyse impact"}
             </button>
+            {busy && graph ? <AnalysisSteps graph={graph} field={oldName} /> : null}
             {result ? (
               <p className="type-caption">
                 Analysed in {result.report.computedMs} ms across {graph?.nodes.length} components.
@@ -219,7 +272,8 @@ export function NewChangeClient() {
               revealLevels={result?.report.levels}
               rippleKey={rippleKey}
               selectedId={null}
-              className="h-[460px]"
+              scanning={scanning}
+              className={cn("h-[460px] transition-shadow duration-500", scanning && "ai-glow")}
             />
           ) : (
             <div className="h-[460px] rounded-xl bg-zinc-50 animate-pulse" />
@@ -229,7 +283,7 @@ export function NewChangeClient() {
       </div>
 
       {result && graph ? (
-        <>
+        <div key={rippleKey} className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-500">
           <ImpactKpis report={result.report} />
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8 flex flex-col gap-3">
@@ -242,7 +296,7 @@ export function NewChangeClient() {
               <GrepCard report={result.report} />
             </div>
           </div>
-        </>
+        </div>
       ) : null}
     </PageShell>
   );

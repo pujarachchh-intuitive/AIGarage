@@ -7,7 +7,7 @@ import { Card, primaryButton, secondaryButton } from "@/components/ui/page";
 import { DEMO_REPOS, fetchGithubStatus, runGithubAgent } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/lib/store";
-import type { AgentEvent, Change, Graph } from "@/lib/types";
+import type { AgentEvent, Change, GithubStatus, Graph } from "@/lib/types";
 
 type Preview = Extract<AgentEvent, { type: "preview" }>;
 
@@ -46,16 +46,12 @@ function DiffView({ diff }: { diff: string }) {
 export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Change; graph: Graph; reportMarkdown: () => string }) {
   const repos = useApp((s) => s.repos);
   const setPullRequest = useApp((s) => s.setPullRequest);
-  const [status, setStatus] = useState<{ configured: boolean; login?: string; error?: string } | null>(null);
+  const [status, setStatus] = useState<GithubStatus | null>(null);
   const [busy, setBusy] = useState<"preview" | "pr" | null>(null);
   const [steps, setSteps] = useState<string[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<{ message: string; newErrors?: { file: string; line: number; message: string }[] } | null>(null);
   const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    void fetchGithubStatus().then(setStatus);
-  }, []);
 
   // Which real repo does this change belong to?
   const target = useMemo(() => {
@@ -64,6 +60,19 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
     const sample = DEMO_REPOS.find((r) => r.graph.repo === change.repo && r.gitUrl);
     return sample ? { url: sample.gitUrl!, ref: undefined } : null;
   }, [repos, change.repo]);
+
+  // Ask again when the repo changes, and when the user comes back from installing the app.
+  const targetUrl = target?.url;
+  useEffect(() => {
+    const load = () => void fetchGithubStatus(targetUrl).then(setStatus);
+    load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [targetUrl]);
+
+  // Can the server push to this repo right now?
+  const canPush = status?.mode === "app" ? Boolean(status.installed) && !status.error : Boolean(status?.login);
+  const needsInstall = status?.mode === "app" && !status.error && status.installed === false;
 
   const node = graph.nodes.find((n) => n.id === change.request.node);
   const renameable = change.request.change === "rename" && node?.type === "TSField";
@@ -118,12 +127,17 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
       subtitle="Makes this change in the real repo with the TypeScript compiler's rename, checks it, and opens a draft pull request."
       actions={
         status ? (
-          status.configured && status.login ? (
+          status.error ? (
+            <Badge variant="destructive">{status.mode === "app" ? "GitHub App problem" : "Token problem"}</Badge>
+          ) : status.mode === "app" ? (
+            <Badge variant={status.installed ? "success" : "warning"}>
+              GitHub App: {status.app?.slug}
+              {status.installed === false ? " (not installed)" : ""}
+            </Badge>
+          ) : status.login ? (
             <Badge variant="success">GitHub: @{status.login}</Badge>
-          ) : status.configured ? (
-            <Badge variant="destructive">Token problem</Badge>
           ) : (
-            <Badge variant="neutral">No GitHub token</Badge>
+            <Badge variant="neutral">Not connected to GitHub</Badge>
           )
         ) : null
       }
@@ -145,20 +159,32 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
               </button>
               <button
                 className={primaryButton}
-                disabled={busy !== null || !preview || !status?.login || Boolean(pr)}
+                disabled={busy !== null || !preview || !canPush || Boolean(pr)}
                 onClick={() => setConfirming(true)}
-                title={!status?.login ? "Set GITHUB_TOKEN on the server first" : !preview ? "Preview the changes first" : undefined}
+                title={needsInstall ? "Install the GitHub App on this repo first" : !canPush ? "Connect GitHub on the server first" : !preview ? "Preview the changes first" : undefined}
               >
                 {busy === "pr" ? <Loader2 className="animate-spin" /> : <GitPullRequest />}
                 Open draft pull request
               </button>
             </div>
 
-            {!status?.configured ? (
+            {needsInstall && status?.app ? (
+              <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-border bg-zinc-50/80">
+                <span className="text-body text-text-secondary">
+                  The <span className="font-semibold text-text-primary">{status.app.name}</span> app is not installed on this repo yet. Install it, pick this repo, then come back here.
+                </span>
+                <a href={status.app.installUrl} target="_blank" rel="noreferrer" className={cn(secondaryButton, "shrink-0")}>
+                  <ExternalLink />
+                  Install GitHub App
+                </a>
+              </div>
+            ) : null}
+
+            {status && !status.configured ? (
               <p className="type-caption">
-                To open pull requests, add GITHUB_TOKEN to web/.env.local (a fine-grained token with Contents: write and Pull requests: write on this repo) and restart. Preview works without it.
+                To open pull requests, set up the GitHub App (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH in web/.env.local) and restart. A personal GITHUB_TOKEN also works as a fallback. Preview works without either.
               </p>
-            ) : status.error ? (
+            ) : status?.error ? (
               <p className="type-caption text-error">{status.error}</p>
             ) : null}
 

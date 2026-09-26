@@ -54,6 +54,7 @@ Status as of 26 September 2026. Feature IDs (F01 to F63) match the PRD feature l
 | Repo store | `lib/server/repo-store.ts` | Graphs on local disk (`web/.data`). One file to swap for S3 + DynamoDB |
 | Rename agent | `core/scanner/ts-rename.mjs` | TypeScript compiler rename + `keyof` string keys + docs, then a check for **new type errors** in every file that mentions the old name. Refuses if the rename adds errors |
 | GitHub agent | `lib/server/github-agent.ts`, `app/api/github/**` | Fresh clone, edit, check, diff preview; then a new branch `systemdna/...`, commit, push, **draft** PR with the impact report as the description |
+| GitHub App sign-in | `lib/server/github-auth.ts`, `app/api/github/install/callback` | Signs a JWT with the app's private key (Node `crypto`, no new package), then gets a **1-hour token for one repo** with only Contents, Pull requests and Metadata. Commits and PRs show up as `<slug>[bot]`. Falls back to `GITHUB_TOKEN` when no app is set up |
 
 Safety built in:
 - Git runs without a shell, with timeouts and no prompts; option injection in branch names is blocked.
@@ -66,7 +67,9 @@ Tested:
 - A clashing name (`successRate` to `errorRate`) is refused because it adds type errors.
 - The token-missing path.
 
-**Not yet tested:** a real push and PR. It needs a `GITHUB_TOKEN`.
+**Tested with the GitHub App `systemdna1`:** the app JWT, the "not installed" check and message, the install callback redirect, and a preview (22 edits, 4 code files, 2 docs).
+
+**Not yet tested:** a real push and PR. It needs the app installed on the target repo.
 
 ---
 
@@ -91,9 +94,10 @@ Tested:
 ### 2.2 GitHub agent gaps
 
 - Only **renames of TypeScript fields**. No fixes driven by the risk score yet: tests for untested high-risk code, doc updates, type changes. Those need an LLM (Bob) with guard rails.
-- No real PR opened yet (no token in this environment).
-- No fork flow: the token must have push access to the repo.
-- No GitHub App or OAuth: one server token, not per user.
+- No real PR opened yet (the app is not installed on a repo yet).
+- No fork flow: the app must be installed on the repo itself.
+- No per-user sign-in yet. The GitHub App gives per-repo tokens, but SystemDNA itself has no user accounts.
+- No webhooks yet (re-scan on push, PR status).
 - The PR's CI checks and review status are not shown in SystemDNA.
 - The check is type-level only. Tests are not run, because we never execute repo code outside a sandbox.
 
@@ -125,7 +129,7 @@ Tested:
 
 ### Phase B: SaaS MVP (weeks 1 to 3 after the hackathon)
 
-1. **Sign-in with GitHub, and a GitHub App.** Users install the app on chosen repos. The server gets short-lived installation tokens per repo instead of one `GITHUB_TOKEN`. Private repos work.
+1. **Sign-in with GitHub.** The GitHub App part is done (short-lived tokens per repo). Still to do: user sign-in, so each user only sees their own installations. Store the private key in AWS Secrets Manager (`GITHUB_APP_PRIVATE_KEY`).
 2. **Jobs and workers.** Move ingestion and the agent to a queue (SQS) and worker containers (ECS Fargate or EC2). Each job gets a clean container, a CPU and memory cap, and no network except GitHub.
 3. **Storage.** Graphs to S3, repos, changes and PRs to Postgres or DynamoDB, keyed by organisation. Remove localStorage for changes.
 4. **Webhooks.** On every push, re-scan and update the graph. On pull request events, update PR status in SystemDNA.
@@ -144,9 +148,22 @@ Tested:
 
 ## 4. How to use the GitHub agent now
 
-1. Create a fine-grained GitHub token for the target repo with **Contents: Read and write** and **Pull requests: Read and write**.
-2. Put it in `systemdna/web/.env.local` as `GITHUB_TOKEN=...` (see `.env.example`), then restart `npm run dev`.
-3. Connect the repo from a Git URL on **Repositories** (the `marketplace-dashboard` sample is already linked to its GitHub repo).
-4. **New change**: pick a TypeScript field, give the new name, **Analyse impact**, then **Approve plan and run**.
-5. On the change page, **GitHub agent**, then **Preview changes**. Check the diff.
-6. **Open draft pull request**, then confirm. The PR link appears in the panel.
+**Option A: GitHub App (preferred).**
+
+1. GitHub, Settings, Developer settings, **GitHub Apps**, **New GitHub App**.
+   - Setup URL: `http://localhost:3100/api/github/install/callback`
+   - Webhook: untick "Active" for now.
+   - Repository permissions: **Contents: Read and write**, **Pull requests: Read and write**, **Metadata: Read-only**.
+2. Create the app. Note the **App ID**, the slug (the end of `https://github.com/apps/<slug>`) and generate a **private key** (`.pem`). Keep the `.pem` outside the repo.
+3. In `systemdna/web/.env.local` set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and `GITHUB_APP_PRIVATE_KEY_PATH`. Restart `npm run dev`.
+4. Check `http://localhost:3100/api/github/status`. It should show `"mode":"app"` and the app's name.
+5. **Repositories** page, **Install or pick repos**. Choose the target repo. GitHub sends you back with a "GitHub App installed" message.
+
+**Option B: personal token (fallback).** Create a fine-grained token with **Contents: Read and write** and **Pull requests: Read and write**, and set `GITHUB_TOKEN`. It is used only when `GITHUB_APP_ID` is empty.
+
+**Then, for both:**
+
+1. Connect the repo from a Git URL on **Repositories** (the `marketplace-dashboard` sample is already linked to its GitHub repo).
+2. **New change**: pick a TypeScript field, give the new name, **Analyse impact**, then **Approve plan and run**.
+3. On the change page, **GitHub agent**, then **Preview changes**. Check the diff.
+4. **Open draft pull request**, then confirm. The PR link appears in the panel.

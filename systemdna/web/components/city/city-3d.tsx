@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
-import { Minus, Plus, RotateCcw, RotateCw, Scan } from "lucide-react";
+import { Minus, Plus, RotateCcw, RotateCw, LocateFixed } from "lucide-react";
 import { addLighting, buildBuilding, buildWorld, skyBottom, type TimeOfDay, type Weather, type World } from "@/components/city/city-realism";
 import { canvasToPng, registerSnapshot } from "@/lib/city-export";
 import { cn } from "@/lib/cn";
@@ -497,7 +497,7 @@ export function City3D({
           <Minus className="size-4" />
         </button>
         <button className={iconBtn} onClick={() => api.current?.fit()} aria-label="Fit to screen" title="Fit everything in view (0)">
-          <Scan className="size-4" />
+          <LocateFixed className="size-4" />
         </button>
         <button className={iconBtn} onClick={() => api.current?.rotate(-45)} aria-label="Rotate left" title="Rotate left ([)">
           <RotateCcw className="size-4" />

@@ -43,7 +43,7 @@ export function validateGitInput(url: string, ref?: string): string | null {
 }
 
 function scannerPath() {
-  return process.env.SYSTEMDNA_SCANNER ?? path.resolve(/*turbopackIgnore: true*/ process.cwd(), "../core/scanner/ts-scan.mjs");
+  return process.env.SYSTEMDNA_SCANNER || path.resolve(/*turbopackIgnore: true*/ process.cwd(), "../core/scanner/ts-scan.mjs");
 }
 
 /** Runs a command without a shell. Rejects on non-zero exit or timeout. */

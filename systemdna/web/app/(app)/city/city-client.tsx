@@ -393,7 +393,7 @@ export function CityClient() {
             />
           ) : (
             <div className="flex-1 flex flex-col gap-3 min-w-0">
-              <CityMap graph={graph} selectedId={selected} onSelect={(id) => setParam("node", id)} layerFilter={layer} className="flex-1 min-h-0" />
+              <CityMap graph={graph} selectedId={selected} onSelect={(id) => setParam("node", id)} layerFilter={layer} fullscreen={false} className="flex-1 min-h-0" />
               {prefs.map.showLegend ? <CityLegend /> : null}
             </div>
           )}

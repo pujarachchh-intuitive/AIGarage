@@ -62,7 +62,7 @@ On a change page, the **GitHub agent** panel makes the change in the real repo a
 | `GET /api/github/status` | Whether a token is set, and whose (never returns the token) |
 | `POST /api/github/pull-requests` | `{ url, field, to, changeId, title, body, dryRun }`. Streams progress, then the diff, then the PR |
 
-Needs `GITHUB_TOKEN` in `.env.local` (a fine-grained token with Contents and Pull requests write access). Renames of TypeScript fields only, today.
+Signs in as a **GitHub App** (preferred): set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and `GITHUB_APP_PRIVATE_KEY_PATH`, then install the app on the repo from the Repositories page. The agent gets a 1-hour token for that one repo, and PRs show up as `<slug>[bot]`. A personal `GITHUB_TOKEN` works as a fallback. Renames of TypeScript fields only, today. Full steps: `../STATUS.md`, section 4.
 
 ## Settings
 
@@ -73,7 +73,12 @@ Copy `.env.example` to `.env.local`.
 | `NEXT_PUBLIC_API_URL` | empty | FastAPI backend (live mode) |
 | `SYSTEMDNA_DATA_DIR` | `web/.data` | Where graphs are stored |
 | `SYSTEMDNA_SCANNER` | `../core/scanner/ts-scan.mjs` | Scanner path (run `npm install` there once) |
-| `GITHUB_TOKEN` | empty | Lets the GitHub agent push branches and open draft PRs |
+| `GITHUB_APP_ID` | empty | GitHub App id. When set, the agent uses the app instead of `GITHUB_TOKEN` |
+| `GITHUB_APP_SLUG` | empty | The app's URL name (`github.com/apps/<slug>`), for the install link |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | empty | Path to the app's `.pem` file. Keep it outside the repo |
+| `GITHUB_APP_PRIVATE_KEY` | empty | The key inline instead of a file (`
+` for new lines). Handy on AWS |
+| `GITHUB_TOKEN` | empty | Fallback: a personal token for pushing branches and opening draft PRs |
 
 The server also needs `git` installed.
 

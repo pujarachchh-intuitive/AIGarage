@@ -260,6 +260,19 @@ export type IngestEvent =
   | { type: "error"; message: string };
 
 /** One line of the GitHub agent stream. */
+/** What the server can do on GitHub (from /api/github/status). Never holds a secret. */
+export interface GithubStatus {
+  configured: boolean;
+  mode: "app" | "token" | "none";
+  /** Personal token: the account's login. */
+  login?: string;
+  /** GitHub App: its name, slug and install page. */
+  app?: { name: string; slug: string; installUrl: string };
+  /** GitHub App, when asked about one repo: is the app installed there? */
+  installed?: boolean;
+  error?: string;
+}
+
 export type AgentEvent =
   | { type: "progress"; step: string; detail: string }
   | { type: "preview"; files: { file: string; count: number }[]; docs: { file: string; count: number }[]; locations: number; stringKeys: number; diff: string; diffTruncated: boolean }
