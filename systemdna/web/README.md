@@ -22,8 +22,9 @@ Example `.env.local` for live mode:
 
 ```bash
 NEXT_PUBLIC_API_URL=https://api.example.com
-NEXT_PUBLIC_DEMO_TOKEN=change-me
 ```
+
+Never put the demo write token in an env file: every `NEXT_PUBLIC_*` value is baked into the public JavaScript. Type the token into **Settings → Demo write token** instead. It is kept in the browser tab's `sessionStorage` only.
 
 ## Demo repos
 

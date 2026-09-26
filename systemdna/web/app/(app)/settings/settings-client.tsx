@@ -1,16 +1,23 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { KeyRound, Trash2 } from "lucide-react";
+import { useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import { Card, PageHeader, PageShell, secondaryButton } from "@/components/ui/page";
+import { Card, PageHeader, PageShell, inputClass, primaryButton, secondaryButton } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { API_URL, DATA_MODE } from "@/lib/api";
+import { API_URL, DATA_MODE, getDemoToken, setDemoToken, subscribeDemoToken } from "@/lib/api";
 import { useApp } from "@/lib/store";
 
 export function SettingsClient() {
   const graph = useApp((s) => s.graph);
   const changes = useApp((s) => s.changes);
   const resetDemo = useApp((s) => s.resetDemo);
+  const [tokenDraft, setTokenDraft] = useState("");
+  const hasToken = useSyncExternalStore(
+    subscribeDemoToken,
+    () => getDemoToken() !== "",
+    () => false,
+  );
 
   const rows: [string, string][] = [
     ["Data mode", DATA_MODE === "live" ? "Live backend" : "Demo data"],
@@ -36,6 +43,46 @@ export function SettingsClient() {
           <p className="type-caption mt-4">
             To connect the FastAPI server, set NEXT_PUBLIC_API_URL in web/.env.local and restart the dev server.
           </p>
+        </Card>
+        <Card
+          title="Demo write token"
+          subtitle="Needed to create, approve and run changes in live mode. Kept in this tab only (sessionStorage)."
+          actions={<StatusBadge status={hasToken ? "Set" : "Not set"} />}
+        >
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setDemoToken(tokenDraft.trim());
+              setTokenDraft("");
+              toast.success(tokenDraft.trim() ? "Token saved for this tab" : "Token cleared");
+            }}
+          >
+            <input
+              type="password"
+              autoComplete="off"
+              aria-label="Demo write token"
+              value={tokenDraft}
+              onChange={(e) => setTokenDraft(e.target.value)}
+              placeholder={hasToken ? "Token set. Type a new one to replace it" : "Paste the demo token"}
+              className={inputClass}
+            />
+            <button type="submit" className={primaryButton} disabled={!tokenDraft.trim()}>
+              <KeyRound />
+              Save
+            </button>
+            <button
+              type="button"
+              className={secondaryButton}
+              disabled={!hasToken}
+              onClick={() => {
+                setDemoToken("");
+                toast.success("Token cleared");
+              }}
+            >
+              Clear
+            </button>
+          </form>
         </Card>
         <Card title="Local data" subtitle="Changes are saved in this browser.">
           <div className="flex items-center justify-between gap-4">
