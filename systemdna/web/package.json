@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "scan:sample": "node ../core/scanner/ts-scan.mjs ../samples/marketplace-dashboard lib/mock/marketplace-dashboard.graph.json",
-    "test": "vitest run"
+    "test": "vitest run && node --test scripts/test-impact.mjs",
+    "test:impact": "node --test scripts/test-impact.mjs",
+    "bench": "node scripts/bench-impact.mjs",
+    "scan:sample": "node ../core/scanner/ts-scan.mjs ../samples/marketplace-dashboard lib/mock/marketplace-dashboard.graph.json"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.9",

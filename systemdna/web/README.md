@@ -51,6 +51,34 @@ What happens (the page shows each step live):
 | `POST /api/repos/{id}/rescan` | Pull the latest code and rebuild (git repos) |
 | `DELETE /api/repos/{id}` | Remove the repo and its graph |
 
+## Impact analysis and risk
+
+`lib/impact.ts` works out what a change breaks and how risky it is. It runs in the browser in a few milliseconds, and in about 40 ms on a graph with 6,000 nodes and 30,000 links.
+
+It works in three passes:
+
+1. **Ripple.** It walks the links from the changed node. The edge rules and the change kind decide how badly each node is hit. Each node's confidence is the weakest link on its path. The ripple stops at safe nodes.
+2. **Order.** The fix order comes from the affected links. Nodes in a loop must be fixed together, so a loop counts as one step. This uses Tarjan's strongly connected components.
+3. **Risk.** Every affected node gets a 0 to 100 risk made of named factors. You can see them by clicking a row in **Affected components**. The whole change gets a score, a level (low, medium, high, critical), its main drivers and a list of what to do. This appears in the **Risk assessment** card, the downloaded report and the PR description.
+
+The scanner leaves some facts empty, so the engine works them out from the graph:
+
+| Factor | Where it comes from |
+| --- | --- |
+| Tests | Test files (`*.test.*`, `*.spec.*`, `tests/`, `__tests__/`) and the files they import, up to 3 imports away. A test that imports `src/index.ts` covers what the index re-exports |
+| Many dependents | How many components depend on the node, directly or not (counted up to 400, cached per graph) |
+| Public API | Pages, API endpoints, and what a package's `index` file exports |
+| Personal data | The `pii` flag, or a name such as `email`, `phone`, `dob` or `address` |
+| Business process | A `SUPPORTS` link to a business process |
+| Less certain | A path through a medium- or low-confidence link, for example one inferred by IBM Bob |
+
+Check it:
+
+```bash
+npm test        # 21 tests: rules, loops, missing nodes, confidence, risk, speed
+npm run bench   # timings on the sample, every repo in .data/repos and a 6,000-node graph
+```
+
 ## Real change runs and pull requests
 
 For a repo on github.com, the change page runs the change for real (`lib/server/change-agent.ts`); samples without code (ShopFlow) keep the simulator.

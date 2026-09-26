@@ -19,10 +19,19 @@ export function buildReport(change: Change, graph: Graph, view: RunView): string
   lines.push(`- Dangling references: ${view.danglingBefore ?? r.danglingRefs} before, ${view.danglingAfter ?? "not yet re-scanned"} after`);
   lines.push(`- Bobcoins: ${view.bobcoins.toFixed(2)}`, "");
 
-  lines.push("## Affected components", "", "| Component | District | Impact | Risk |", "| --- | --- | --- | --- |");
+  if (r.risk) {
+    lines.push("## Risk assessment", "", `**${r.risk.score} / 100, ${r.risk.level} risk.**`, "");
+    for (const d of r.risk.drivers) lines.push(`- **${d.label}:** ${d.detail}`);
+    lines.push("", "What to do:", "");
+    r.risk.recommendations.forEach((t, k) => lines.push(`${k + 1}. ${t}`));
+    lines.push("");
+  }
+
+  lines.push("## Affected components", "", "| Component | District | Impact | Risk | Why |", "| --- | --- | --- | --- | --- |");
   for (const i of r.items.filter((x) => x.depth > 0)) {
     const n = byId.get(i.nodeId);
-    lines.push(`| ${n?.name} | ${n ? layerLabel(graph, n.layer) : ""} | ${SEVERITY_LABEL[i.severity]} | ${i.risk} |`);
+    const why = (i.factors ?? []).filter((f) => f.points > 0).slice(0, 3).map((f) => f.label).join(", ");
+    lines.push(`| ${n?.name} | ${n ? layerLabel(graph, n.layer) : ""} | ${SEVERITY_LABEL[i.severity]} | ${i.risk} | ${why || "—"} |`);
   }
 
   lines.push("", "## Business impact", "");

@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, Building2, FileCode2, Layers, SearchX, Waves } from "lucide-react";
+import { Fragment, useState } from "react";
+import { AlertTriangle, Building2, ChevronDown, ChevronRight, FileCode2, Gauge, Layers, SearchX, ShieldAlert, Waves } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { KpiTile } from "@/components/ui/kpi-tile";
 import { Card } from "@/components/ui/page";
@@ -8,7 +9,111 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { indexGraph } from "@/lib/impact";
 import { layerLabel, SEVERITY_LABEL } from "@/lib/layers";
-import type { Graph, ImpactReport } from "@/lib/types";
+import { cn } from "@/lib/cn";
+import type { Graph, ImpactReport, RiskLevel } from "@/lib/types";
+
+const LEVEL: Record<RiskLevel, { label: string; badge: "success" | "info" | "warning" | "destructive"; bar: string; text: string }> = {
+  low: { label: "Low risk", badge: "success", bar: "bg-success", text: "text-success" },
+  medium: { label: "Medium risk", badge: "info", bar: "bg-info", text: "text-info" },
+  high: { label: "High risk", badge: "warning", bar: "bg-warning", text: "text-warning" },
+  critical: { label: "Critical risk", badge: "destructive", bar: "bg-error", text: "text-error" },
+};
+
+/** Text with `names` in backticks shown as code. */
+function Rich({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(`[^`]+`)/g).map((part, i) =>
+        part.startsWith("`") && part.endsWith("`") ? (
+          <code key={i} className="px-1 py-px rounded bg-surface-secondary border border-border font-mono text-[0.85em] text-text-primary">
+            {part.slice(1, -1)}
+          </code>
+        ) : (
+          <Fragment key={i}>{part}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+/** The risk of the whole change: score, level, what drives it and what to do. */
+export function RiskCard({ report }: { report: ImpactReport }) {
+  const risk = report.risk;
+  if (!risk) return null;
+  const tone = LEVEL[risk.level];
+  const maxDriver = Math.max(1, ...risk.drivers.map((d) => d.points));
+  const sure = risk.confidence.high;
+  const unsure = risk.confidence.medium + risk.confidence.low;
+  const files = risk.coverage.tested + risk.coverage.untested;
+  return (
+    <Card title="Risk assessment" subtitle="How risky this change is, why, and what to do before shipping it." actions={<Badge variant={tone.badge}>{tone.label}</Badge>}>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-3 flex flex-col gap-3">
+          <div className="flex items-end gap-1.5">
+            <span className={cn("text-5xl font-semibold tracking-tighter tabular-nums", tone.text)}>{risk.score}</span>
+            <span className="type-caption pb-1.5">/ 100</span>
+          </div>
+          <div className="relative h-2 rounded-full bg-surface-secondary overflow-hidden">
+            <div className={cn("h-full rounded-full transition-[width] duration-700 ease-out", tone.bar)} style={{ width: `${risk.score}%` }} />
+            {[25, 50, 70].map((m) => (
+              <span key={m} className="absolute top-0 bottom-0 w-px bg-background/80" style={{ left: `${m}%` }} />
+            ))}
+          </div>
+          <div className="flex flex-col gap-1.5 pt-1">
+            <span className="flex items-center justify-between gap-2 text-body">
+              <span className="text-text-secondary">Files with tests</span>
+              <span className="font-semibold text-text-primary tabular-nums">{risk.coverage.known ? `${risk.coverage.tested} of ${files}` : "No tests in repo"}</span>
+            </span>
+            <span className="flex items-center justify-between gap-2 text-body">
+              <span className="text-text-secondary">Sure / less sure</span>
+              <span className="font-semibold text-text-primary tabular-nums">
+                {sure} / {unsure}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        <div className="lg:col-span-4 flex flex-col gap-3">
+          <p className="type-label flex items-center gap-1.5">
+            <Gauge className="size-3.5" />
+            What drives it
+          </p>
+          {risk.drivers.length === 0 ? <p className="type-caption">Nothing stands out.</p> : null}
+          {risk.drivers.map((d) => (
+            <div key={d.label} className="flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-body font-semibold text-text-primary">{d.label}</span>
+                <div className="w-20 h-1.5 rounded-full bg-surface-secondary overflow-hidden shrink-0">
+                  <div className="h-full rounded-full bg-text-primary" style={{ width: `${(d.points / maxDriver) * 100}%` }} />
+                </div>
+              </div>
+              <span className="type-caption">
+                <Rich text={d.detail} />
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="lg:col-span-5 flex flex-col gap-3">
+          <p className="type-label flex items-center gap-1.5">
+            <ShieldAlert className="size-3.5" />
+            What to do
+          </p>
+          <ol className="flex flex-col gap-2">
+            {risk.recommendations.map((r, i) => (
+              <li key={i} className="flex gap-2.5 text-body text-text-secondary">
+                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-secondary border border-border text-caption font-semibold text-text-primary">{i + 1}</span>
+                <span>
+                  <Rich text={r} />
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 export function ImpactKpis({ report }: { report: ImpactReport }) {
   const count = (s: string) => report.items.filter((i) => i.severity === s).length;
@@ -33,6 +138,15 @@ export function AffectedTable({ report, graph }: { report: ImpactReport; graph: 
   const { byId } = indexGraph(graph);
   const edgeById = new Map(graph.edges.map((e) => [e.id, e]));
   const rows = report.items.filter((i) => i.depth > 0);
+  const hot = new Set(report.risk?.hotspots.slice(0, 3));
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setOpen((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   return (
     <div className="border border-border rounded-xl overflow-hidden">
       <Table>
@@ -50,14 +164,31 @@ export function AffectedTable({ report, graph }: { report: ImpactReport; graph: 
           {rows.map((item) => {
             const n = byId.get(item.nodeId)!;
             const e = item.viaEdge ? edgeById.get(item.viaEdge) : undefined;
+            const why = Boolean(item.factors?.length || (item.path?.length ?? 0) > 2);
+            const expanded = open.has(item.nodeId);
             return (
-              <TableRow key={item.nodeId}>
-                <TableCell>
-                  <div className="flex flex-col">
-                    <span className="font-semibold text-text-primary">{n.name}</span>
-                    <span className="type-caption">{n.file}</span>
-                  </div>
-                </TableCell>
+              <Fragment key={item.nodeId}>
+                <TableRow className={cn(why && "cursor-pointer")} onClick={why ? () => toggle(item.nodeId) : undefined} aria-expanded={why ? expanded : undefined}>
+                  <TableCell>
+                    <div className="flex items-start gap-1.5">
+                      {why ? (
+                        expanded ? (
+                          <ChevronDown className="size-3.5 mt-0.5 text-icon-secondary shrink-0" />
+                        ) : (
+                          <ChevronRight className="size-3.5 mt-0.5 text-icon-secondary shrink-0" />
+                        )
+                      ) : (
+                        <span className="w-3.5 shrink-0" />
+                      )}
+                      <div className="flex flex-col">
+                        <span className="flex items-center gap-1.5 font-semibold text-text-primary">
+                          {n.name}
+                          {hot.has(item.nodeId) ? <Badge variant="destructive">Hotspot</Badge> : null}
+                        </span>
+                        <span className="type-caption">{n.file}</span>
+                      </div>
+                    </div>
+                  </TableCell>
                 <TableCell className="text-text-secondary">{layerLabel(graph, n.layer)}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
@@ -66,18 +197,52 @@ export function AffectedTable({ report, graph }: { report: ImpactReport; graph: 
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2" title={item.factors?.map((f) => `${f.label} +${f.points}`).join(" · ")}>
                     <div className="w-16 h-1.5 rounded-full bg-surface-secondary overflow-hidden">
-                      <div className="h-full bg-text-primary rounded-full" style={{ width: `${item.risk}%` }} />
+                      <div className={cn("h-full rounded-full", item.risk >= 70 ? "bg-error" : item.risk >= 50 ? "bg-warning" : "bg-text-primary")} style={{ width: `${item.risk}%` }} />
                     </div>
-                    <span className="type-caption text-text-secondary">{item.risk}</span>
+                    <span className="type-caption text-text-secondary tabular-nums">{item.risk}</span>
+                    {item.confidence !== "high" ? <Badge variant="neutral">{item.confidence === "low" ? "Unsure" : "Likely"}</Badge> : null}
                   </div>
                 </TableCell>
                 <TableCell>
                   {e?.source === "bob" ? <StatusBadge status="Found by Bob" /> : <Badge variant="neutral">Parser</Badge>}
                 </TableCell>
                 <TableCell className="type-caption">{e?.evidence ?? "—"}</TableCell>
-              </TableRow>
+                </TableRow>
+                {expanded ? (
+                  <TableRow className="bg-surface-secondary/60 hover:bg-surface-secondary/60">
+                    <TableCell colSpan={6}>
+                      <div className="flex flex-col gap-3 pl-5 py-1 animate-in fade-in duration-200">
+                        {item.path && item.path.length > 1 ? (
+                          <div className="flex flex-wrap items-center gap-1.5 type-caption">
+                            <span className="font-semibold text-text-primary">How the change gets here:</span>
+                            {item.path.map((id, k) => (
+                              <Fragment key={id}>
+                                {k > 0 ? <ChevronRight className="size-3 text-icon-secondary" /> : null}
+                                <span className={cn("px-1.5 py-px rounded border border-border bg-surface", k === item.path!.length - 1 && "font-semibold text-text-primary")}>{byId.get(id)?.name ?? id}</span>
+                              </Fragment>
+                            ))}
+                          </div>
+                        ) : null}
+                        {item.factors?.length ? (
+                          <div className="flex flex-col gap-1">
+                            {item.factors.map((f) => (
+                              <div key={f.label} className="flex items-center gap-3 text-body">
+                                <span className="w-10 shrink-0 text-right font-semibold tabular-nums text-text-primary">{f.points > 0 ? `+${f.points}` : "·"}</span>
+                                <span className="w-36 shrink-0 font-semibold text-text-primary">{f.label}</span>
+                                <span className="text-text-secondary">{f.detail}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="type-caption">Safe: the ripple stops here, so there is nothing to fix.</p>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </Fragment>
             );
           })}
         </TableBody>
