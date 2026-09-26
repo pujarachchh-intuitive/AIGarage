@@ -49,19 +49,24 @@ function describe(ev: RunEvent): { text: string; tone: "neutral" | "info" | "war
     case "check_passed":
       return { text: `${who}: ${ev.detail}`, tone: "info" };
     case "done":
-      return { text: `${who} done`, tone: "success" };
+      return { text: `${who} done${ev.detail ? `: ${ev.detail}` : ""}`, tone: "success" };
     case "quarantined":
       return { text: `${who} quarantined: ${ev.detail}`, tone: "error" };
     case "wave_completed":
       return { text: `Wave ${ev.wave} complete`, tone: "success" };
     case "rescan":
-      return { text: `Graph re-scan: dangling references ${ev.data?.before} → ${ev.data?.after}`, tone: "success" };
+      return ev.detail
+        ? { text: ev.detail, tone: Number(ev.data?.after ?? 0) === 0 ? "success" : "warning" }
+        : { text: `Graph re-scan: dangling references ${ev.data?.before} → ${ev.data?.after}`, tone: "success" };
     case "inspector":
-      return { text: `Inspector ${ev.data?.verdict}: ${ev.data?.issues} issues`, tone: "success" };
+      if (ev.data?.verdict === "skipped") return { text: ev.detail ?? "Inspector skipped", tone: "neutral" };
+      return { text: `Inspector ${String(ev.data?.verdict).replace("_", " ")}: ${ev.data?.issues} issues`, tone: ev.data?.verdict === "approved" ? "success" : "warning" };
     case "pr_created":
       return { text: `Branch ${ev.data?.branch} ready${ev.data?.simulated ? " (simulated)" : ""}`, tone: "success" };
     case "change_completed":
-      return { text: "Change complete", tone: "success" };
+      return ev.detail
+        ? { text: ev.detail, tone: /^(Failed|Stopped|Refused)/.test(ev.detail) ? "error" : /need a human|type errors and/.test(ev.detail) ? "warning" : "success" }
+        : { text: "Change complete", tone: "success" };
   }
 }
 
@@ -232,7 +237,11 @@ export function GraphDiffCard({ change, graph, view }: { change: Change; graph: 
   return (
     <Card
       title="Graph diff"
-      subtitle={`Every link that pointed at "${change.report.oldName}" now points at "${change.request.to}".`}
+      subtitle={
+        change.request.change === "rename"
+          ? `Every link that pointed at "${change.report.oldName}" now points at "${change.request.to}".`
+          : `The links the change broke, and whether each was fixed.`
+      }
       actions={
         <div className="flex items-center gap-2">
           <Badge variant="destructive">{view.danglingBefore ?? change.report.danglingRefs} before</Badge>

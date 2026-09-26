@@ -6,7 +6,7 @@
 import { computeImpact } from "@/lib/impact";
 import marketplaceGraph from "@/lib/mock/marketplace-dashboard.graph.json";
 import { shopflowGraph } from "@/lib/mock/shopflow";
-import type { AgentEvent, ChangeRequest, ConnectedRepo, DataMode, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
+import type { AgentEvent, BobStatus, ChangeRequest, ChangeRunRequest, ChangeStreamLine, ConnectedRepo, DataMode, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
 export const DATA_MODE: DataMode = API_URL ? "live" : "demo";
@@ -113,13 +113,14 @@ async function readNdjson<E extends { type: string }>(res: Response, onEvent: (e
 }
 
 export async function connectRepo(
-  input: { url: string; ref?: string } | { file: File },
+  input: ({ url: string; ref?: string } | { file: File }) & { bob?: boolean },
   onEvent: (e: IngestEvent) => void,
 ): Promise<IngestEvent> {
   let res: Response;
   if ("file" in input) {
     const form = new FormData();
     form.append("file", input.file);
+    if (input.bob) form.append("bob", "true");
     res = await fetch("/api/repos", { method: "POST", body: form });
   } else {
     res = await fetch("/api/repos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
@@ -212,7 +213,65 @@ export interface AgentRequest {
   dryRun: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// IBM Bob (app/api/bob). The key stays on the server.
+// ---------------------------------------------------------------------------
+
+export async function fetchBobStatus(): Promise<BobStatus> {
+  const res = await fetch("/api/bob/status", { cache: "no-store" }).catch(() => null);
+  return res?.ok ? res.json() : { configured: false, cli: false, ready: false, reason: `Status check failed${res ? ` (${res.status})` : ""}` };
+}
+
 export async function runGithubAgent(input: AgentRequest, onEvent: (e: AgentEvent) => void): Promise<AgentEvent> {
   const res = await fetch("/api/github/pull-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  return readNdjson<AgentEvent>(res, onEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Real change runs (app/api/changes). The compiler or IBM Bob Fixer agents make
+// the change in a fresh clone; the PR is opened later from the stored patch.
+// ---------------------------------------------------------------------------
+
+/** Streams a real run. Resolves when the stream ends; `signal` stops it. */
+export async function runChangeStream(req: ChangeRunRequest, onLine: (l: ChangeStreamLine) => void, signal?: AbortSignal): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch("/api/changes/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req), signal });
+  } catch (err) {
+    if (!signal?.aborted) onLine({ type: "error", message: err instanceof Error ? err.message : "Could not reach the server" });
+    return;
+  }
+  if (!res.ok || !res.body) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    onLine({ type: "error", message: body?.error ?? `The run could not start (${res.status})` });
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          onLine(JSON.parse(line) as ChangeStreamLine);
+        } catch {
+          // Skip malformed lines.
+        }
+      }
+    }
+  } catch (err) {
+    if (!signal?.aborted) onLine({ type: "error", message: err instanceof Error ? err.message : "The connection closed early" });
+  }
+}
+
+/** Opens a draft PR from a real run's stored patch. */
+export async function openPullRequestFromPatch(input: { patchId: string; title: string; body: string }, onEvent: (e: AgentEvent) => void): Promise<AgentEvent> {
+  const res = await fetch("/api/changes/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
   return readNdjson<AgentEvent>(res, onEvent);
 }

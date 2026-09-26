@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, FileArchive, GitBranch, Link2, Loader2, Map as MapIcon, Upload, X } from "lucide-react";
 import { Card, PageHeader, PageShell, SecondaryLink, inputClass, primaryButton, secondaryButton } from "@/components/ui/page";
-import { connectRepo } from "@/lib/api";
+import { connectRepo, fetchBobStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/lib/store";
-import type { ConnectedRepo, IngestEvent } from "@/lib/types";
+import type { BobStatus, ConnectedRepo, IngestEvent } from "@/lib/types";
 
 // The steps the ingestion service reports, in order. Scanner steps map onto them.
 const STEPS = [
@@ -17,6 +17,7 @@ const STEPS = [
   { id: "parse", label: "Read declarations", hint: "Types, fields, functions, components, pages" },
   { id: "references", label: "Link references", hint: "The TypeScript compiler finds every use" },
   { id: "docs", label: "Read docs and imports", hint: "Markdown that describes the types; file-to-file imports" },
+  { id: "bob", label: "IBM Bob Cartographer", hint: "Bob adds links the parser cannot see and flags personal data" },
   { id: "saved", label: "Save the knowledge graph", hint: "Ready for the city, graph and changes" },
 ] as const;
 
@@ -29,6 +30,7 @@ const STEP_OF: Record<string, (typeof STEPS)[number]["id"]> = {
   references: "references",
   docs: "docs",
   imports: "docs",
+  bob: "bob",
   write: "saved",
   done: "saved",
   saved: "saved",
@@ -51,9 +53,20 @@ export function ConnectRepoClient() {
   const [error, setError] = useState<string | null>(null);
   const [repo, setRepoResult] = useState<ConnectedRepo | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [bobStatus, setBobStatus] = useState<BobStatus | null>(null);
+  const [useBob, setUseBob] = useState(false);
 
+  useEffect(() => {
+    void fetchBobStatus().then((s) => {
+      setBobStatus(s);
+      setUseBob(s.ready);
+    });
+  }, []);
+
+  // The Bob step shows only when Bob enrichment is on.
+  const steps = STEPS.filter((s) => s.id !== "bob" || useBob);
   const canStart = phase !== "running" && (mode === "git" ? url.trim().length > 0 : Boolean(file));
-  const currentIndex = current ? STEPS.findIndex((s) => s.id === current) : -1;
+  const currentIndex = current ? steps.findIndex((s) => s.id === current) : -1;
 
   const onEvent = (e: IngestEvent) => {
     if (e.type === "progress") {
@@ -78,7 +91,8 @@ export function ConnectRepoClient() {
     setCurrent("fetch");
     setRepoResult(null);
     try {
-      const last = await connectRepo(mode === "git" ? { url: url.trim(), ref: ref.trim() || undefined } : { file: file! }, onEvent);
+      const source = mode === "git" ? { url: url.trim(), ref: ref.trim() || undefined } : { file: file! };
+      const last = await connectRepo({ ...source, bob: useBob }, onEvent);
       if (last.type === "done") await loadRepos();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -198,6 +212,26 @@ export function ConnectRepoClient() {
               </div>
             )}
 
+            <label className={cn("flex items-start gap-2.5", bobStatus?.ready ? "cursor-pointer" : "opacity-60")}>
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 accent-zinc-900"
+                checked={useBob}
+                disabled={!bobStatus?.ready || phase === "running"}
+                onChange={(e) => setUseBob(e.target.checked)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="type-label">Enrich with IBM Bob</span>
+                <span className="type-caption">
+                  {bobStatus === null
+                    ? "Checking IBM Bob…"
+                    : bobStatus.ready
+                      ? "Bob reads the code after the scan and adds links the parser cannot see (fetch calls, string keys, config). Uses Bobcoins and adds a few minutes."
+                      : `Not available: ${bobStatus.reason}`}
+                </span>
+              </span>
+            </label>
+
             <button className={cn(primaryButton, "justify-center")} disabled={!canStart} onClick={start}>
               {phase === "running" ? <Loader2 className="animate-spin" /> : <MapIcon />}
               {phase === "running" ? "Building the knowledge graph…" : "Build knowledge graph"}
@@ -214,7 +248,7 @@ export function ConnectRepoClient() {
 
         <Card title="Progress" subtitle={phase === "idle" ? "This is what happens when you start." : undefined} className="lg:col-span-7">
           <ol className="flex flex-col">
-            {STEPS.map((s, i) => {
+            {steps.map((s, i) => {
               const state =
                 phase === "done" || (currentIndex > i && phase !== "idle")
                   ? "done"
@@ -237,7 +271,7 @@ export function ConnectRepoClient() {
                     >
                       {state === "done" ? <Check className="size-3.5" /> : state === "active" ? <Loader2 className="size-3.5 animate-spin" /> : state === "failed" ? <X className="size-3.5" /> : i + 1}
                     </span>
-                    {i < STEPS.length - 1 ? <span className="w-px flex-1 min-h-4 bg-border my-1" /> : null}
+                    {i < steps.length - 1 ? <span className="w-px flex-1 min-h-4 bg-border my-1" /> : null}
                   </div>
                   <div className="flex flex-col pb-4 min-w-0">
                     <span className={cn("text-body font-semibold", state === "todo" ? "text-text-tertiary" : "text-text-primary")}>{s.label}</span>
@@ -268,6 +302,7 @@ export function ConnectRepoClient() {
                   ["Links", repo.stats.edges],
                   ["Imports", repo.stats.imports],
                   ["Districts", repo.stats.layers],
+                  ...(repo.stats.bobLinks !== undefined ? [["Found by Bob", repo.stats.bobLinks]] : []),
                 ].map(([k, v]) => (
                   <div key={k} className="flex flex-col">
                     <span className="type-caption">{k}</span>

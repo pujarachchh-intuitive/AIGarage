@@ -4,6 +4,8 @@
 //   2. Edit      core/scanner/ts-rename.mjs: the TypeScript compiler's own rename,
 //                plus `keyof` string keys and docs that name the field
 //   3. Check     no new type errors in any file that mentions the old name
+//   3b. Review   IBM Bob Inspector reads the diff and gives a verdict (dry run
+//                only; optional, never changes the edits)
 //   4. Preview   git diff, returned to the browser (dry run stops here)
 //   5. Push      a new branch systemdna/<change> (never the default branch)
 //   6. PR        a DRAFT pull request with the impact report as its description
@@ -14,16 +16,19 @@
 import "server-only";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { extractJson, runBob, scrubBob, TASK_FILE } from "@/lib/server/bob";
 import { LIMITS, run, validateGitInput, withWorkspace } from "@/lib/server/ingest";
+import type { BobReview } from "@/lib/types";
 
 export type AgentEvent =
   | { type: "progress"; step: string; detail: string }
   | { type: "preview"; files: { file: string; count: number }[]; docs: { file: string; count: number }[]; locations: number; stringKeys: number; diff: string; diffTruncated: boolean }
+  | { type: "review"; review: BobReview }
   | { type: "done"; dryRun: true }
   | { type: "done"; dryRun: false; pr: { url: string; number: number; branch: string; base: string } }
   | { type: "error"; message: string; newErrors?: { file: string; line: number; message: string }[] };
 
-type Emit = (e: AgentEvent) => void;
+export type Emit = (e: AgentEvent) => void;
 
 export interface PullRequestInput {
   url: string;
@@ -37,7 +42,7 @@ export interface PullRequestInput {
   dryRun: boolean;
 }
 
-const MAX_DIFF = 200_000;
+export const MAX_DIFF = 200_000;
 
 function token() {
   return process.env.GITHUB_TOKEN?.trim() || "";
@@ -52,7 +57,7 @@ function authConfig(): string[] {
 }
 
 /** Never let the token reach a message. */
-function scrub(message: string) {
+export function scrub(message: string) {
   const t = token();
   let out = message;
   if (t) out = out.split(t).join("***");
@@ -94,9 +99,14 @@ export async function githubStatus(): Promise<{ configured: boolean; login?: str
   }
 }
 
-function renamePath() {
+/** A script next to the scanner in core/scanner (ts-rename.mjs, ts-check.mjs). */
+export function scannerTool(name: string) {
   const scanner = process.env.SYSTEMDNA_SCANNER ?? path.resolve(/*turbopackIgnore: true*/ process.cwd(), "../core/scanner/ts-scan.mjs");
-  return path.join(/*turbopackIgnore: true*/ path.dirname(scanner), "ts-rename.mjs");
+  return path.join(/*turbopackIgnore: true*/ path.dirname(scanner), name);
+}
+
+function renamePath() {
+  return scannerTool("ts-rename.mjs");
 }
 
 export async function runPullRequest(input: PullRequestInput, emit: Emit) {
@@ -113,12 +123,7 @@ export async function runPullRequest(input: PullRequestInput, emit: Emit) {
   return withWorkspace(async (dir) => {
     // 1. Clone.
     emit({ type: "progress", step: "clone", detail: `Cloning ${target.owner}/${target.repo}` });
-    const cloneArgs = [...authConfig(), "-c", "protocol.file.allow=never", "-c", "core.symlinks=false", "clone", "--depth", "1", "--single-branch", "--no-tags", "--quiet"];
-    if (input.ref) cloneArgs.push("--branch", input.ref);
-    cloneArgs.push("--", input.url, dir);
-    await run("git", cloneArgs, { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1" } }).catch((e: Error) => {
-      throw new Error(scrub(e.message));
-    });
+    await cloneRepo(dir, input.url, input.ref);
 
     // 2 and 3. Rename and check.
     emit({ type: "progress", step: "edit", detail: `Renaming ${input.field} to ${input.to} with the TypeScript compiler` });
@@ -149,6 +154,26 @@ export async function runPullRequest(input: PullRequestInput, emit: Emit) {
     }
     emit({ type: "progress", step: "check", detail: `${result.locations} edits in ${result.files.length} code files and ${result.docs.length} docs; no new type errors` });
 
+    // 3b. Bob Inspector (preview only; the browser adds the review to the PR body).
+    if (input.dryRun) {
+      emit({ type: "progress", step: "inspect", detail: "IBM Bob Inspector is reviewing the diff" });
+      const [type, field] = input.field.split(".");
+      const review = await inspectWithBob(
+        dir,
+        `Rename the field \`${input.field}\` (field \`${field}\` of type \`${type}\`) to \`${input.to}\`. The edits were made by the TypeScript compiler's rename and passed a type check.`,
+        `Look for places the rename should have reached but did not: string literals, dynamic property access, JSON, config, tests, docs, SQL or API payloads that still use \`${field}\` for this type. Ignore other types that happen to have a field with the same name.`,
+      );
+      emit({ type: "review", review });
+      emit({
+        type: "progress",
+        step: "inspected",
+        detail:
+          review.status === "done"
+            ? `Bob Inspector: ${review.verdict === "approved" ? "approved" : "changes requested"}${review.issues.length ? `, ${review.issues.length} notes` : ""}`
+            : `Bob Inspector skipped: ${review.reason}`,
+      });
+    }
+
     // 4. Preview.
     let diff = "";
     await run("git", ["-C", dir, "diff", "--no-color"], { timeoutMs: 60_000, onChunk: (t) => (diff += t) });
@@ -166,38 +191,127 @@ export async function runPullRequest(input: PullRequestInput, emit: Emit) {
       return;
     }
 
-    // 5. Branch, commit, push. Never the default branch.
-    const branch = `systemdna/${input.changeId}-${input.field.split(".")[1]}-to-${input.to}`.toLowerCase().replace(/[^a-z0-9/_-]+/g, "-").slice(0, 100);
-    emit({ type: "progress", step: "push", detail: `Pushing branch ${branch}` });
-    const repoInfo = await github<{ default_branch: string; permissions?: { push?: boolean } }>(`/repos/${target.owner}/${target.repo}`);
-    if (repoInfo.permissions && !repoInfo.permissions.push) {
-      throw new Error(`The token cannot push to ${target.owner}/${target.repo}. Give it Contents: write, or fork the repo and connect the fork.`);
-    }
-    const base = input.ref || repoInfo.default_branch;
-    const git = (args: string[]) => run("git", ["-C", dir, ...args], { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0" } }).catch((e: Error) => {
-      throw new Error(scrub(e.message));
-    });
-    await git(["checkout", "-b", branch]);
-    await git(["add", "-A"]);
-    await git([
-      "-c", "user.name=SystemDNA Agent",
-      "-c", "user.email=agent@systemdna.dev",
-      "commit", "--quiet", "--no-verify",
-      "-m", input.title,
-      "-m", `Rename ${input.field} to ${input.to} across ${result.files.length} code files and ${result.docs.length} docs.\nMade by the SystemDNA GitHub agent with the TypeScript compiler's rename. No new type errors.`,
-    ]);
-    await run("git", [...authConfig(), "-C", dir, "push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0" } }).catch((e: Error) => {
-      throw new Error(scrub(e.message));
-    });
-
-    // 6. Draft pull request.
-    emit({ type: "progress", step: "pr", detail: "Opening a draft pull request" });
-    const pr = await github<{ html_url: string; number: number }>(`/repos/${target.owner}/${target.repo}/pulls`, {
-      method: "POST",
-      body: JSON.stringify({ title: input.title, head: branch, base, body: input.body.slice(0, 60_000), draft: true }),
-    });
-    emit({ type: "done", dryRun: false, pr: { url: pr.html_url, number: pr.number, branch, base } });
+    // 5 and 6. Branch, commit, push, draft PR. Never the default branch.
+    const pr = await pushAndOpenPr(dir, input.url, {
+      ref: input.ref,
+      branch: `systemdna/${input.changeId}-${input.field.split(".")[1]}-to-${input.to}`,
+      title: input.title,
+      commitBody: `Rename ${input.field} to ${input.to} across ${result.files.length} code files and ${result.docs.length} docs.\nMade by the SystemDNA GitHub agent with the TypeScript compiler's rename. No new type errors.`,
+      body: input.body,
+    }, emit);
+    emit({ type: "done", dryRun: false, pr });
   });
+}
+
+/** A fresh shallow clone into dir. The token (if any) goes in a header, never the URL. */
+export async function cloneRepo(dir: string, url: string, ref?: string) {
+  const cloneArgs = [...authConfig(), "-c", "protocol.file.allow=never", "-c", "core.symlinks=false", "clone", "--depth", "1", "--single-branch", "--no-tags", "--quiet"];
+  if (ref) cloneArgs.push("--branch", ref);
+  cloneArgs.push("--", url, dir);
+  await run("git", cloneArgs, { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1" } }).catch((e: Error) => {
+    throw new Error(scrub(e.message));
+  });
+}
+
+/**
+ * Commits everything in dir on a new branch systemdna/..., pushes it and opens a
+ * DRAFT pull request. Never touches the default branch.
+ */
+export async function pushAndOpenPr(
+  dir: string,
+  url: string,
+  opts: { ref?: string; branch: string; title: string; commitBody: string; body: string },
+  emit: Emit,
+): Promise<{ url: string; number: number; branch: string; base: string }> {
+  if (!token()) throw new Error("Set GITHUB_TOKEN on the server to open pull requests.");
+  const target = ownerRepo(url);
+  if (!target) throw new Error("The GitHub agent works with github.com repositories today.");
+  const branch = opts.branch.toLowerCase().replace(/[^a-z0-9/_-]+/g, "-").slice(0, 100);
+  emit({ type: "progress", step: "push", detail: `Pushing branch ${branch}` });
+  const repoInfo = await github<{ default_branch: string; permissions?: { push?: boolean } }>(`/repos/${target.owner}/${target.repo}`);
+  if (repoInfo.permissions && !repoInfo.permissions.push) {
+    throw new Error(`The token cannot push to ${target.owner}/${target.repo}. Give it Contents: write, or fork the repo and connect the fork.`);
+  }
+  const base = opts.ref || repoInfo.default_branch;
+  const git = (args: string[]) => run("git", ["-C", dir, ...args], { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0" } }).catch((e: Error) => {
+    throw new Error(scrub(e.message));
+  });
+  await git(["checkout", "-b", branch]);
+  await git(["add", "-A"]);
+  await git([
+    "-c", "user.name=SystemDNA Agent",
+    "-c", "user.email=agent@systemdna.dev",
+    "commit", "--quiet", "--no-verify",
+    "-m", opts.title,
+    "-m", opts.commitBody,
+  ]);
+  await run("git", [...authConfig(), "-C", dir, "push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { timeoutMs: LIMITS.cloneMs, env: { GIT_TERMINAL_PROMPT: "0" } }).catch((e: Error) => {
+    throw new Error(scrub(e.message));
+  });
+  emit({ type: "progress", step: "pr", detail: "Opening a draft pull request" });
+  const pr = await github<{ html_url: string; number: number }>(`/repos/${target.owner}/${target.repo}/pulls`, {
+    method: "POST",
+    body: JSON.stringify({ title: opts.title, head: branch, base, body: opts.body.slice(0, 60_000), draft: true }),
+  });
+  return { url: pr.html_url, number: pr.number, branch, base };
+}
+
+/**
+ * Asks Bob to review the edits in dir against the change. Bob is told to only
+ * read; to be sure, the edits are staged first and anything Bob changes is
+ * thrown away afterwards, so the diff and the PR are exactly the agents'. Never throws.
+ */
+export async function inspectWithBob(dir: string, change: string, focus: string, opts: { maxCost?: number } = {}): Promise<BobReview> {
+  const git = (args: string[]) => run("git", ["-C", dir, ...args], { timeoutMs: 60_000, env: { GIT_TERMINAL_PROMPT: "0" } });
+  let diff = "";
+  try {
+    await git(["add", "-A"]);
+    await run("git", ["-C", dir, "diff", "--cached", "--no-color"], { timeoutMs: 60_000, onChunk: (t) => (diff += t) });
+  } catch (err) {
+    return { status: "skipped", reason: err instanceof Error ? err.message : "Could not read the diff" };
+  }
+  const task = `# SystemDNA Inspector task
+
+You are the Inspector agent of SystemDNA. Review a change that was already made in this repository.
+
+- Change: ${change}
+- The staged diff is below. You may read any file in this folder to check it.
+
+Rules:
+- Do NOT edit, create or delete any file. Do NOT run commands that change files. Only read.
+- ${focus}
+- Do not include \`${TASK_FILE}\` in your answer.
+
+Reply with ONLY this JSON, no other text:
+{"verdict": "approved" | "changes_requested", "summary": "one or two sentences", "issues": [{"file": "path", "line": 0, "message": "what is missed or wrong"}]}
+
+Use "approved" when nothing is missed. Keep at most 10 issues.
+
+## Staged diff
+
+\`\`\`diff
+${diff.slice(0, 60_000)}
+\`\`\`
+`;
+  const result = await runBob(dir, task, opts.maxCost ? { maxCost: opts.maxCost } : {});
+  // Throw away anything Bob changed, then unstage so later steps see the same tree.
+  await git(["checkout", "--", "."]).catch(() => {});
+  await git(["clean", "-fdxq"]).catch(() => {});
+  await git(["reset", "-q"]).catch(() => {});
+  if (!result.ok) return { status: "skipped", reason: result.error ?? "Bob did not finish" };
+  const parsed = extractJson<{ verdict?: string; summary?: string; issues?: { file?: string; line?: number; message?: string }[] }>(result.lastMessage);
+  if (!parsed) return { status: "skipped", reason: "Bob's answer was not valid JSON" };
+  return {
+    status: "done",
+    verdict: parsed.verdict === "approved" ? "approved" : "changes_requested",
+    summary: scrubBob(String(parsed.summary ?? "")).slice(0, 600),
+    issues: (parsed.issues ?? [])
+      .filter((i) => i && i.message)
+      .slice(0, 10)
+      .map((i) => ({ file: String(i.file ?? "").slice(0, 300), line: Number(i.line) || undefined, message: scrubBob(String(i.message)).slice(0, 400) })),
+    bobcoins: result.bobcoins,
+    durationMs: result.durationMs,
+  };
 }
 
 /** Streams agent events as newline-delimited JSON. */
