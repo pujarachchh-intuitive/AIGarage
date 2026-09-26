@@ -347,6 +347,31 @@ for (const word of new Set(fields.map((n) => n.name.split(".")[1]))) {
 }
 
 // ---------------------------------------------------------------------------
+// Pass 5: files for the 3D city (one building per file).
+// Lines of code, language, top-level folder, and resolved local imports.
+// ---------------------------------------------------------------------------
+const LANGUAGE = { ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript", md: "markdown", mdx: "markdown", json: "json", css: "css", yml: "yaml", yaml: "yaml" };
+const cityFiles = allFiles
+  .map((f) => ({ f, r: rel(f), ext: path.extname(f).slice(1).toLowerCase() }))
+  .filter(({ r, ext }) => LANGUAGE[ext] && !r.split("/").some((p) => p.startsWith(".")) && !/(^|\/)package-lock\.json$/.test(r) && r !== "next-env.d.ts" && !r.startsWith("public/"))
+  .map(({ f, r, ext }) => {
+    const text = fs.readFileSync(f, "utf8");
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "").length;
+    const imports = new Set();
+    if (["ts", "tsx", "js", "jsx", "mjs", "cjs"].includes(ext)) {
+      for (const imp of ts.preProcessFile(text, true, true).importedFiles) {
+        const res = ts.resolveModuleName(imp.fileName, f, parsed.options, ts.sys).resolvedModule;
+        if (!res || res.isExternalLibraryImport) continue;
+        const target = rel(res.resolvedFileName);
+        if (!target.startsWith("..") && !target.includes("node_modules")) imports.add(target);
+      }
+    }
+    return { path: r, dir: r.includes("/") ? r.split("/")[0] : "root", lines, language: LANGUAGE[ext], imports: [...imports] };
+  });
+const knownPaths = new Set(cityFiles.map((x) => x.path));
+for (const x of cityFiles) x.imports = x.imports.filter((p) => knownPaths.has(p));
+
+// ---------------------------------------------------------------------------
 // Output.
 // ---------------------------------------------------------------------------
 const graph = {
@@ -364,6 +389,7 @@ const graph = {
   nodes: [...nodes.values()],
   edges: [...edges.values()],
   textIndex,
+  files: cityFiles,
 };
 
 fs.mkdirSync(path.dirname(path.resolve(outArg)), { recursive: true });
@@ -374,5 +400,6 @@ console.log(
   `Scanned ${files.length} files in ${repoName}: ${graph.nodes.length} nodes ` +
     `(${count("TSType")} types, ${count("TSField")} fields, ${count("Function")} functions, ` +
     `${count("Component")} components, ${count("Page")} pages, ${count("Doc")} docs, ` +
-    `${count("BusinessProcess")} business uses), ${graph.edges.length} edges -> ${outArg}`,
+    `${count("BusinessProcess")} business uses), ${graph.edges.length} edges, ` +
+    `${cityFiles.length} files, ${cityFiles.reduce((n, x) => n + x.imports.length, 0)} imports -> ${outArg}`,
 );

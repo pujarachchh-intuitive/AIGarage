@@ -96,6 +96,18 @@ export interface GraphEdge {
   rule: EdgeRule;
 }
 
+/** One file in the repo. The 3D city draws one building per file. */
+export interface RepoFile {
+  path: string;
+  /** Top-level folder, or "root" for files at the top. */
+  dir: string;
+  /** Non-blank lines. */
+  lines: number;
+  language: string;
+  /** Local files this file imports. */
+  imports: string[];
+}
+
 export interface Graph {
   repo: string;
   scannedAt: string;
@@ -104,6 +116,8 @@ export interface Graph {
   edges: GraphEdge[];
   /** Word -> files that contain it as plain text. Used by the grep comparison. */
   textIndex?: Record<string, string[]>;
+  /** Per-file data from the scanner. Graphs without it get estimated files. */
+  files?: RepoFile[];
 }
 
 export type ChangeKind = "rename" | "type_change" | "delete";

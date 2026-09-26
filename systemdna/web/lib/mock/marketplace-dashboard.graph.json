@@ -1,6 +1,6 @@
 {
   "repo": "marketplace-dashboard",
-  "scannedAt": "2026-09-25T23:06:18.313Z",
+  "scannedAt": "2026-09-26T10:46:22.388Z",
   "layers": [
     {
       "id": "types",
@@ -9367,5 +9367,384 @@
       "data/seed.ts",
       "lib/types.ts"
     ]
-  }
+  },
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "dir": "root",
+      "lines": 5,
+      "language": "markdown",
+      "imports": []
+    },
+    {
+      "path": "app/globals.css",
+      "dir": "app",
+      "lines": 171,
+      "language": "css",
+      "imports": []
+    },
+    {
+      "path": "app/layout.tsx",
+      "dir": "app",
+      "lines": 45,
+      "language": "typescript",
+      "imports": [
+        "components/Sidebar.tsx"
+      ]
+    },
+    {
+      "path": "app/marketplaces/page.tsx",
+      "dir": "app",
+      "lines": 5,
+      "language": "typescript",
+      "imports": [
+        "components/views/MarketplacesView.tsx",
+        "lib/data.ts"
+      ]
+    },
+    {
+      "path": "app/marketplaces/[slug]/page.tsx",
+      "dir": "app",
+      "lines": 18,
+      "language": "typescript",
+      "imports": []
+    },
+    {
+      "path": "app/matrix/page.tsx",
+      "dir": "app",
+      "lines": 13,
+      "language": "typescript",
+      "imports": [
+        "components/DeploymentMatrix.tsx",
+        "components/PageShell.tsx"
+      ]
+    },
+    {
+      "path": "app/page.tsx",
+      "dir": "app",
+      "lines": 17,
+      "language": "typescript",
+      "imports": [
+        "components/views/OverviewView.tsx",
+        "lib/data.ts"
+      ]
+    },
+    {
+      "path": "app/products/page.tsx",
+      "dir": "app",
+      "lines": 46,
+      "language": "typescript",
+      "imports": [
+        "components/views/ProductsView.tsx",
+        "lib/data.ts"
+      ]
+    },
+    {
+      "path": "app/products/[id]/page.tsx",
+      "dir": "app",
+      "lines": 245,
+      "language": "typescript",
+      "imports": [
+        "components/PageShell.tsx",
+        "components/StatusBadge.tsx",
+        "components/TrendChart.tsx",
+        "lib/data.ts",
+        "lib/status.ts"
+      ]
+    },
+    {
+      "path": "app/progress/page.tsx",
+      "dir": "app",
+      "lines": 20,
+      "language": "typescript",
+      "imports": [
+        "components/ProgressUpdatesSection.tsx",
+        "lib/data.ts"
+      ]
+    },
+    {
+      "path": "app/reports/page.tsx",
+      "dir": "app",
+      "lines": 11,
+      "language": "typescript",
+      "imports": [
+        "components/views/ReportView.tsx",
+        "lib/data.ts"
+      ]
+    },
+    {
+      "path": "app/risks/page.tsx",
+      "dir": "app",
+      "lines": 16,
+      "language": "typescript",
+      "imports": [
+        "components/PageShell.tsx",
+        "components/RiskList.tsx",
+        "lib/data.ts"
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "dir": "root",
+      "lines": 1,
+      "language": "markdown",
+      "imports": []
+    },
+    {
+      "path": "components/DeploymentMatrix.tsx",
+      "dir": "components",
+      "lines": 82,
+      "language": "typescript",
+      "imports": [
+        "components/StatusBadge.tsx",
+        "lib/data.ts",
+        "lib/types.ts"
+      ]
+    },
+    {
+      "path": "components/KpiStrip.tsx",
+      "dir": "components",
+      "lines": 127,
+      "language": "typescript",
+      "imports": [
+        "lib/data.ts",
+        "lib/status.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/MarketplaceCard.tsx",
+      "dir": "components",
+      "lines": 65,
+      "language": "typescript",
+      "imports": [
+        "lib/data.ts",
+        "lib/status.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/PageShell.tsx",
+      "dir": "components",
+      "lines": 38,
+      "language": "typescript",
+      "imports": [
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/PrintButton.tsx",
+      "dir": "components",
+      "lines": 10,
+      "language": "typescript",
+      "imports": []
+    },
+    {
+      "path": "components/ProductTable.tsx",
+      "dir": "components",
+      "lines": 95,
+      "language": "typescript",
+      "imports": [
+        "components/StatusBadge.tsx",
+        "lib/data.ts",
+        "lib/status.ts"
+      ]
+    },
+    {
+      "path": "components/ProgressUpdatesSection.tsx",
+      "dir": "components",
+      "lines": 832,
+      "language": "typescript",
+      "imports": [
+        "components/PageShell.tsx",
+        "lib/types.ts",
+        "lib/status.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/RiskList.tsx",
+      "dir": "components",
+      "lines": 60,
+      "language": "typescript",
+      "imports": [
+        "lib/data.ts",
+        "lib/types.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/Sidebar.tsx",
+      "dir": "components",
+      "lines": 112,
+      "language": "typescript",
+      "imports": [
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/StatusBadge.tsx",
+      "dir": "components",
+      "lines": 22,
+      "language": "typescript",
+      "imports": [
+        "lib/status.ts",
+        "lib/types.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/TrendChart.tsx",
+      "dir": "components",
+      "lines": 107,
+      "language": "typescript",
+      "imports": [
+        "lib/status.ts"
+      ]
+    },
+    {
+      "path": "components/views/MarketplacesView.tsx",
+      "dir": "components",
+      "lines": 74,
+      "language": "typescript",
+      "imports": [
+        "components/MarketplaceCard.tsx",
+        "components/PageShell.tsx",
+        "lib/data.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/views/OverviewView.tsx",
+      "dir": "components",
+      "lines": 89,
+      "language": "typescript",
+      "imports": [
+        "components/KpiStrip.tsx",
+        "components/MarketplaceCard.tsx",
+        "components/PageShell.tsx",
+        "components/ProductTable.tsx",
+        "components/RiskList.tsx",
+        "lib/data.ts",
+        "lib/types.ts"
+      ]
+    },
+    {
+      "path": "components/views/ProductsView.tsx",
+      "dir": "components",
+      "lines": 316,
+      "language": "typescript",
+      "imports": [
+        "components/PageShell.tsx",
+        "components/ProductTable.tsx",
+        "lib/data.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "components/views/ReportView.tsx",
+      "dir": "components",
+      "lines": 103,
+      "language": "typescript",
+      "imports": [
+        "components/PageShell.tsx",
+        "components/ProductTable.tsx",
+        "lib/data.ts",
+        "lib/status.ts",
+        "lib/utils.ts"
+      ]
+    },
+    {
+      "path": "data/seed.ts",
+      "dir": "data",
+      "lines": 641,
+      "language": "typescript",
+      "imports": [
+        "lib/types.ts"
+      ]
+    },
+    {
+      "path": "docs/PRD.md",
+      "dir": "docs",
+      "lines": 97,
+      "language": "markdown",
+      "imports": []
+    },
+    {
+      "path": "eslint.config.mjs",
+      "dir": "root",
+      "lines": 16,
+      "language": "javascript",
+      "imports": []
+    },
+    {
+      "path": "lib/data.ts",
+      "dir": "lib",
+      "lines": 295,
+      "language": "typescript",
+      "imports": [
+        "data/seed.ts",
+        "lib/status.ts",
+        "lib/types.ts"
+      ]
+    },
+    {
+      "path": "lib/status.ts",
+      "dir": "lib",
+      "lines": 66,
+      "language": "typescript",
+      "imports": [
+        "lib/types.ts"
+      ]
+    },
+    {
+      "path": "lib/types.ts",
+      "dir": "lib",
+      "lines": 116,
+      "language": "typescript",
+      "imports": []
+    },
+    {
+      "path": "lib/utils.ts",
+      "dir": "lib",
+      "lines": 5,
+      "language": "typescript",
+      "imports": []
+    },
+    {
+      "path": "next.config.ts",
+      "dir": "root",
+      "lines": 5,
+      "language": "typescript",
+      "imports": []
+    },
+    {
+      "path": "package.json",
+      "dir": "root",
+      "lines": 30,
+      "language": "json",
+      "imports": []
+    },
+    {
+      "path": "postcss.config.mjs",
+      "dir": "root",
+      "lines": 6,
+      "language": "javascript",
+      "imports": []
+    },
+    {
+      "path": "README.md",
+      "dir": "root",
+      "lines": 42,
+      "language": "markdown",
+      "imports": []
+    },
+    {
+      "path": "tsconfig.json",
+      "dir": "root",
+      "lines": 34,
+      "language": "json",
+      "imports": []
+    }
+  ]
 }

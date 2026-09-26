@@ -2,11 +2,13 @@
 
 import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, GitBranch } from "lucide-react";
+import { Box, ChevronDown, GitBranch, Network } from "lucide-react";
 import { CityLegend } from "@/components/city/city-legend";
+import { City3DView } from "@/components/city/city-3d-view";
 import { CityMap } from "@/components/city/city-map";
 import { NodePanel } from "@/components/city/node-panel";
 import { PageHeader, PageShell, PrimaryLink } from "@/components/ui/page";
+import { cn } from "@/lib/cn";
 import { useApp } from "@/lib/store";
 import type { LayerId } from "@/lib/types";
 
@@ -17,6 +19,7 @@ export function CityClient() {
   const params = useSearchParams();
   const selected = params.get("node");
   const layer = (params.get("layer") as LayerId | null) ?? "all";
+  const view = params.get("view") === "3d" ? "3d" : "map";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params.toString());
@@ -45,7 +48,29 @@ export function CityClient() {
         }
         actions={
           <>
-            <div className="relative">
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-surface-secondary border border-border" role="tablist" aria-label="City view">
+              {(
+                [
+                  ["map", "Dependency map", Network],
+                  ["3d", "3D city", Box],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={view === id}
+                  onClick={() => setParam("view", id === "map" ? null : id)}
+                  className={cn(
+                    "cursor-pointer h-8 px-3 inline-flex items-center gap-2 rounded-md text-body font-semibold transition-colors",
+                    view === id ? "bg-surface text-text-primary shadow-2xs border border-border" : "text-text-tertiary hover:text-text-primary",
+                  )}
+                >
+                  <Icon className="size-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className={cn("relative", view === "3d" && "hidden")}>
               <select
                 value={layer}
                 onChange={(e) => setParam("layer", e.target.value === "all" ? null : e.target.value)}
@@ -69,6 +94,22 @@ export function CityClient() {
         }
       />
 
+      {view === "3d" ? (
+        graph ? (
+          <City3DView
+            graph={graph}
+            onOpenNode={(id) => {
+              const next = new URLSearchParams(params.toString());
+              next.delete("view");
+              next.set("node", id);
+              router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+            }}
+            className="flex-1 min-h-[600px]"
+          />
+        ) : (
+          <div className="flex-1 min-h-[600px] rounded-xl bg-zinc-50 animate-pulse" />
+        )
+      ) : (
       <div className="flex gap-4 flex-1 min-h-[560px]">
         <div className="flex-1 flex flex-col gap-3 min-w-0">
           {graph ? (
@@ -93,6 +134,7 @@ export function CityClient() {
           />
         ) : null}
       </div>
+      )}
     </PageShell>
   );
 }
