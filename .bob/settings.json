@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{"type": "command",
+        "command": "python systemdna/engine/hooks/report.py",
+        "timeout": 5}]
+    }],
+    "PreToolUse": [{
+      "matcher": ".*",
+      "hooks": [{"type": "command",
+        "command": "python systemdna/engine/hooks/permit_check.py",
+        "timeout": 5}]
+    }],
+    "PostToolUse": [{
+      "matcher": ".*",
+      "hooks": [{"type": "command",
+        "command": "python systemdna/engine/hooks/report.py",
+        "timeout": 5}]
+    }],
+    "Stop": [{
+      "hooks": [{"type": "command",
+        "command": "python systemdna/engine/hooks/report.py",
+        "timeout": 5}]
+    }]
+  }
+}
