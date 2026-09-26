@@ -8,7 +8,7 @@ export function PageShell({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "w-full min-h-full border border-border rounded-2xl p-6 bg-surface flex flex-col gap-6",
+        "w-full min-h-full border border-border rounded-2xl p-8 bg-surface flex flex-col gap-8",
         className,
       )}
       {...props}
@@ -34,7 +34,7 @@ export function PageHeader({
           <h1 className="type-title truncate">{title}</h1>
           {meta}
         </div>
-        {subtitle ? <p className="type-subtitle mt-1">{subtitle}</p> : null}
+        {subtitle ? <p className="text-body text-text-tertiary mt-1">{subtitle}</p> : null}
       </div>
       {actions ? <div className="flex items-center gap-3 shrink-0">{actions}</div> : null}
     </div>
@@ -42,13 +42,13 @@ export function PageHeader({
 }
 
 export const primaryButton =
-  "cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-body font-semibold text-white shadow-2xs active:scale-[0.98] transition-[transform,background-color] duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none [&>svg]:size-4";
+  "cursor-pointer inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-body bg-brand text-brand-ink font-semibold shadow-[inset_0_-1px_0_rgb(0_0_0/0.14),0_1px_2px_rgb(0_0_0/0.08)] hover:-translate-y-px hover:shadow-[inset_0_-1px_0_rgb(0_0_0/0.14),0_8px_18px_-10px_rgb(0_0_0/0.4)] active:translate-y-0 active:scale-[0.98] transition-[transform,box-shadow] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-40 disabled:pointer-events-none [&>svg]:size-4";
 
 export const secondaryButton =
-  "cursor-pointer inline-flex items-center gap-2 px-3 py-2 border border-border rounded-lg bg-surface hover:bg-surface-hover hover:border-border-strong text-body font-semibold text-zinc-700 shadow-2xs active:scale-[0.98] transition-[transform,background-color,border-color] duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none [&>svg]:size-4";
+  "cursor-pointer inline-flex items-center gap-2 h-9 px-3 border border-border rounded-lg bg-surface hover:bg-surface-hover hover:border-border-strong text-body font-medium text-text-primary active:scale-[0.98] transition-[transform,background-color,border-color] duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none [&>svg]:size-4 [&>svg]:text-icon-secondary";
 
 export const inputClass =
-  "h-10 w-full px-3 border border-border rounded-lg bg-surface text-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-border-strong transition-colors duration-150";
+  "h-10 w-full px-3 border border-border rounded-lg bg-surface text-body text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-brand-soft transition-[border-color,box-shadow] duration-150";
 
 export function PrimaryLink({ className, ...props }: ComponentProps<typeof Link>) {
   return <Link className={cn(primaryButton, className)} {...props} />;
@@ -75,11 +75,11 @@ export function Card({
   children: ReactNode;
 }) {
   return (
-    <section className={cn("border border-border rounded-2xl bg-surface flex flex-col min-w-0", className)}>
+    <section className={cn("border border-border rounded-xl bg-surface flex flex-col min-w-0", className)}>
       {title ? (
         <header className="flex items-start justify-between gap-4 px-5 pt-4 pb-3">
           <div className="flex flex-col min-w-0">
-            <h2 className="type-heading truncate">{title}</h2>
+            <h2 className="text-[13px] leading-5 font-semibold tracking-[-0.005em] text-text-primary truncate">{title}</h2>
             {subtitle ? <p className="type-caption mt-0.5">{subtitle}</p> : null}
           </div>
           {actions ? <div className="flex items-center gap-2 shrink-0">{actions}</div> : null}

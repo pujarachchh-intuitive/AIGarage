@@ -1,0 +1,89 @@
+/* System model overlays: the hover card and crew tags. Charcoal + acid, both themes. */
+
+.model-card {
+  transform: translate(-50%, calc(-100% - 14px));
+  width: 288px;
+  padding: 12px 14px 12px;
+  border-radius: 12px;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  color: #f3f4ee;
+  background: rgba(14, 15, 12, 0.88);
+  border: 1px solid rgba(243, 244, 238, 0.12);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 24px 48px -20px rgba(0, 0, 0, 0.6);
+  user-select: none;
+  animation: model-card-in 0.18s cubic-bezier(0.2, 0.7, 0.1, 1) both;
+}
+@keyframes model-card-in {
+  from { opacity: 0; transform: translate(-50%, calc(-100% - 6px)); }
+}
+@media (prefers-reduced-motion: reduce) { .model-card { animation: none; } }
+
+.model-card::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 1px;
+  height: 14px;
+  background: linear-gradient(rgba(216, 245, 63, 0.9), rgba(216, 245, 63, 0));
+}
+
+.model-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(243, 244, 238, 0.6);
+}
+.model-card-dot { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+.model-card-sep { width: 10px; height: 1px; background: rgba(243, 244, 238, 0.25); }
+
+.model-card-name { margin-top: 8px; font-size: 15px; font-weight: 600; letter-spacing: -0.015em; color: #fff; }
+.model-card-path {
+  margin-top: 1px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: rgba(243, 244, 238, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card-stats {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: 10px;
+  border-top: 1px solid rgba(243, 244, 238, 0.1);
+  padding-top: 10px;
+}
+.model-card-stats div { display: flex; flex-direction: column-reverse; gap: 2px; }
+.model-card-stats dt { font-size: 10px; color: rgba(243, 244, 238, 0.5); }
+.model-card-stats dd { font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 13px; color: #fff; font-variant-numeric: tabular-nums; }
+
+.model-card-flags { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px; }
+.model-card-flags span {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(243, 244, 238, 0.16);
+  color: rgba(243, 244, 238, 0.85);
+}
+.model-card-flags span[data-kind="critical"] { border-color: rgba(216, 245, 63, 0.55); color: #d8f53f; }
+.model-card-flags span[data-kind="pii"] { border-color: rgba(232, 176, 74, 0.55); color: #e8b04a; }
+.model-card-flags span[data-kind="bob"] { background: #d8f53f; border-color: #d8f53f; color: #121310; }
+
+.model-card-owner { margin-top: 10px; font-size: 11px; color: rgba(243, 244, 238, 0.55); }
+
+/* Crew tags on the landing page. */
+.model-tag--crew { border-color: rgba(216, 245, 63, 0.4); }
+.model-tag--crew .model-tag-meta { color: #d8f53f; text-transform: none; letter-spacing: 0.02em; }
+.landing-root .model-tag--crew,
+.model-tag--crew { background: rgba(14, 15, 12, 0.9); color: #f3f4ee; border-color: rgba(216, 245, 63, 0.45); }

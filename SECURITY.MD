@@ -96,3 +96,9 @@ Contact hackathon support through the mentor channel.
 - [GitHub Security Best Practices](https://docs.github.com/en/code-security)
 - [IBM Cloud Security](https://cloud.ibm.com/docs/account?topic=account-security)
 - [Environment Variables Guide](https://12factor.net/config)
+
+## 🖥️ SystemDNA frontend (web/)
+
+- Every `VITE_*` variable is baked into the public JS bundle. Only `VITE_DATA_MODE`, `VITE_API_BASE` and `VITE_WS_URL` may be set, and none of them are secret.
+- The demo write token is typed into the running app (settings modal) and kept in memory or `sessionStorage` only. It never goes in `.env`, the repo, a commit or a prompt.
+- Before deploying `dist/` to S3 + CloudFront, run `npm run build` and search `dist/` for tokens or private URLs.

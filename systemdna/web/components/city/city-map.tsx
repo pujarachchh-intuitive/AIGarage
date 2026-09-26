@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import cytoscape, { type Core, type EdgeSingular, type ElementDefinition, type Position } from "cytoscape";
-import { Expand, LocateFixed, Minus, Plus, RotateCcw, Shrink, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import cytoscape, { type Collection, type Core, type ElementDefinition } from "cytoscape";
+import { Minus, Plus, Scan, ShieldAlert } from "lucide-react";
 import { registerSnapshot } from "@/lib/city-export";
-import { useFullscreen } from "@/lib/use-fullscreen";
-import { indexGraph } from "@/lib/impact";
+import { BRAND, STATE, accentForLayer } from "@/lib/palette";
 import type { AgentState, BuildingState } from "@/lib/run-state";
 import { useIsDark } from "@/lib/theme";
 import { readTokens, type Tokens } from "@/lib/tokens";
-import type { Graph, LayerId, Severity } from "@/lib/types";
+import type { Graph, GraphNode, LayerId, Severity } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
 export interface CityAgent {
@@ -33,259 +32,328 @@ interface CityMapProps {
   buildingState?: Record<string, BuildingState>;
   agents?: CityAgent[];
   layerFilter?: LayerId | "all";
-  /** Show a full-screen button on the map. Off when the page has its own (Agent City toolbar). */
+  /** Accepted for compatibility; full screen lives in the Agent City toolbar. */
   fullscreen?: boolean;
-  /** Node id the AI is analysing from. While set, the map plays the "scanning the graph" effect. */
+  /** Node id the AI is analysing from. While set, the map shows the scanning glow. */
   scanning?: string | null;
   className?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Effects layer: a canvas on top of the map for ripple rings and sparks that
-// run along edges. Effects point at node and edge ids, so they follow pan and zoom.
+// Layout (graph units). Cytoscape draws card bodies, bands and edges; an HTML
+// overlay, kept in sync with the viewport, draws the typography and glyphs.
 // ---------------------------------------------------------------------------
+const CARD_W = 184;
+const LEAF_H = 52;
+const HEAD_H = 50;
+const ROW_H = 26;
+const ROW_GAP = 4;
+const BOX_PAD = 8;
+const CARD_GAP = 14;
+const SUB_GAP = 14;
+const COL_GAP = 44;
+const BAND_PAD = 10;
+const BAND_HEAD = 50;
+const QUALITY_GAP = 48;
 
-interface Ring {
+const TYPE_LABEL: Partial<Record<GraphNode["type"], string>> = {
+  SQLModel: "sql model",
+  SparkJob: "spark job",
+  ORMModel: "orm model",
+  TSType: "ts type",
+  TSField: "field",
+  BusinessProcess: "process",
+};
+const typeLabel = (t: GraphNode["type"]) => TYPE_LABEL[t] ?? t.toLowerCase();
+
+interface Card {
   id: string;
-  t0: number;
-  dur: number;
-  color: string;
-  /** Final radius in graph units. */
-  max: number;
-  width: number;
+  kind: "leaf" | "box" | "field";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  node: GraphNode;
+  label: string;
+  accent: string;
+  bob: number;
+  pii: boolean;
 }
 
-interface Spark {
-  edge: string;
-  t0: number;
-  dur: number;
-  color: string;
-  /** Run from target to source. */
-  reverse: boolean;
+interface Header {
+  id: string;
+  label: string;
+  count: number;
+  accent: string;
+  x: number;
+  y: number;
+  w: number;
 }
 
-interface Fx {
-  rings: Ring[];
-  sparks: Spark[];
-  /** The changed node: sends out a ring every so often while the impact is shown. */
-  epicenter: string | null;
-  lastEpicenter: number;
-  /** The node the AI scan starts from. */
-  scanSource: string | null;
-  lastScan: number;
-  reduced: boolean;
+function boxHeight(kids: number) {
+  return HEAD_H + kids * (ROW_H + ROW_GAP) - ROW_GAP + BOX_PAD;
 }
 
-function edgePath(e: EdgeSingular): Position[] {
-  const pts = [e.renderedSourceEndpoint()];
-  try {
-    pts.push(...(e.renderedSegmentPoints() ?? []));
-  } catch {
-    // Straight edges have no segment points.
+function buildLayout(graph: Graph) {
+  const children = new Map<string, GraphNode[]>();
+  for (const n of graph.nodes) {
+    if (n.parent) children.set(n.parent, [...(children.get(n.parent) ?? []), n]);
   }
-  pts.push(e.renderedTargetEndpoint());
-  return pts;
-}
-
-function pointAlong(pts: Position[], p: number): Position {
-  const lens: number[] = [];
-  let total = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const l = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-    lens.push(l);
-    total += l;
+  const bobCount = new Map<string, number>();
+  for (const e of graph.edges) {
+    if (e.source !== "bob") continue;
+    bobCount.set(e.from, (bobCount.get(e.from) ?? 0) + 1);
+    bobCount.set(e.to, (bobCount.get(e.to) ?? 0) + 1);
   }
-  let d = Math.max(0, Math.min(1, p)) * total;
-  for (let i = 0; i < lens.length; i++) {
-    if (d <= lens[i] || i === lens.length - 1) {
-      const f = lens[i] ? d / lens[i] : 0;
-      return { x: pts[i].x + (pts[i + 1].x - pts[i].x) * f, y: pts[i].y + (pts[i + 1].y - pts[i].y) * f };
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const els: ElementDefinition[] = [];
+  const cards: Card[] = [];
+  const headers: Header[] = [];
+  const heightOf = (n: GraphNode) => {
+    const k = children.get(n.id)?.length ?? 0;
+    return k > 0 ? boxHeight(k) : LEAF_H;
+  };
+
+  const place = (n: GraphNode, left: number, top: number, accent: string) => {
+    const kids = children.get(n.id) ?? [];
+    const h = heightOf(n);
+    const cx = left + CARD_W / 2;
+    const kind = kids.length > 0 ? "box" : "leaf";
+    const bob = (bobCount.get(n.id) ?? 0) + kids.reduce((s, k) => s + (bobCount.get(k.id) ?? 0), 0);
+    els.push({
+      data: { id: n.id, w: CARD_W, h, layer: n.layer },
+      position: { x: cx, y: top + h / 2 },
+      classes: `asset ${kind}`,
+    });
+    cards.push({ id: n.id, kind, x: left, y: top, w: CARD_W, h, node: n, label: n.name, accent, bob, pii: n.pii });
+    kids.forEach((k, i) => {
+      const w = CARD_W - BOX_PAD * 2;
+      const y = top + HEAD_H + i * (ROW_H + ROW_GAP);
+      const short = k.name.includes(".") ? k.name.split(".").slice(1).join(".") : k.name;
+      els.push({
+        data: { id: k.id, w, h: ROW_H, layer: k.layer, owner: n.id },
+        position: { x: cx, y: y + ROW_H / 2 },
+        classes: "field",
+      });
+      cards.push({ id: k.id, kind: "field", x: left + BOX_PAD, y, w, h: ROW_H, node: k, label: short, accent, bob: bobCount.get(k.id) ?? 0, pii: k.pii });
+    });
+    return h;
+  };
+
+  // Layers left to right. A tall layer wraps into sub-columns so the map
+  // keeps a landscape shape that fills a wide canvas.
+  const columns = graph.layers.filter((l) => l.column >= 0).sort((a, b) => a.column - b.column);
+  const roots = (layer: string) => graph.nodes.filter((n) => n.layer === layer && !n.parent);
+  const totals = columns.map((l) => roots(l.id).reduce((s, n) => s + heightOf(n) + CARD_GAP, 0));
+  const tallestCard = Math.max(LEAF_H, ...graph.nodes.filter((n) => !n.parent).map(heightOf));
+  const maxH = Math.max(tallestCard, 520, Math.min(1300, Math.max(0, ...totals) / 3));
+
+  let x = 0;
+  let maxY = 0;
+  const spans: { id: string; x0: number; x1: number }[] = [];
+  for (const layer of columns) {
+    const accent = accentForLayer(graph.layers, layer.id);
+    let left = x;
+    let y = 0;
+    for (const n of roots(layer.id)) {
+      const h = heightOf(n);
+      if (y > 0 && y + h > maxH) {
+        left += CARD_W + SUB_GAP;
+        y = 0;
+      }
+      place(n, left, y, accent);
+      y += h + CARD_GAP;
+      maxY = Math.max(maxY, y - CARD_GAP);
     }
-    d -= lens[i];
+    const x1 = left + CARD_W;
+    spans.push({ id: layer.id, x0: x, x1 });
+    headers.push({
+      id: layer.id,
+      label: layer.label,
+      count: graph.nodes.filter((n) => n.layer === layer.id).length,
+      accent,
+      x: x - BAND_PAD,
+      y: -BAND_HEAD,
+      w: x1 - x + BAND_PAD * 2,
+    });
+    x = x1 + COL_GAP;
   }
-  return pts[0];
+  const totalW = Math.max(CARD_W, x - COL_GAP);
+  // Equal-height bands read as a calm grid.
+  for (const s of spans) {
+    const w = s.x1 - s.x0 + BAND_PAD * 2;
+    const h = maxY + BAND_HEAD + BAND_PAD;
+    els.push({
+      data: { id: `band:${s.id}`, w, h, layer: s.id },
+      position: { x: (s.x0 + s.x1) / 2, y: -BAND_HEAD + h / 2 },
+      classes: "band",
+      selectable: false,
+    });
+  }
+
+  // Tests and docs sit in a row under the map.
+  const qLayer = graph.layers.find((l) => l.column < 0);
+  const qNodes = graph.nodes.filter((n) => n.layer === (qLayer?.id ?? "quality") && !n.parent);
+  if (qNodes.length > 0) {
+    const qid = qLayer?.id ?? "quality";
+    const accent = accentForLayer(graph.layers, qid);
+    const top = maxY + BAND_PAD + QUALITY_GAP;
+    const perRow = Math.max(1, Math.floor((totalW + SUB_GAP) / (CARD_W + SUB_GAP)));
+    let rowTop = top;
+    let rowH = 0;
+    let usedW = 0;
+    qNodes.forEach((n, i) => {
+      const col = i % perRow;
+      if (col === 0 && i > 0) {
+        rowTop += rowH + CARD_GAP;
+        rowH = 0;
+      }
+      const left = col * (CARD_W + SUB_GAP);
+      rowH = Math.max(rowH, place(n, left, rowTop, accent));
+      usedW = Math.max(usedW, left + CARD_W);
+    });
+    const w = usedW + BAND_PAD * 2;
+    const h = rowTop + rowH - top + BAND_HEAD + BAND_PAD;
+    els.push({
+      data: { id: `band:${qid}`, w, h, layer: qid },
+      position: { x: usedW / 2, y: top - BAND_HEAD + h / 2 },
+      classes: "band",
+      selectable: false,
+    });
+    headers.push({
+      id: qid,
+      label: qLayer?.label ?? "Tests and docs",
+      count: graph.nodes.filter((n) => n.layer === qid).length,
+      accent,
+      x: -BAND_PAD,
+      y: top - BAND_HEAD,
+      w,
+    });
+  }
+
+  const quality = new Set(qNodes.flatMap((n) => [n.id, ...(children.get(n.id) ?? []).map((k) => k.id)]));
+  for (const e of graph.edges) {
+    if (!byId.has(e.from) || !byId.has(e.to)) continue;
+    const cls = [e.source === "bob" ? "bob" : "parser"];
+    if (quality.has(e.from) || quality.has(e.to)) cls.push("vert");
+    else if (byId.get(e.from)!.layer === byId.get(e.to)!.layer) cls.push("same");
+    els.push({ data: { id: e.id, source: e.from, target: e.to, type: e.type }, classes: cls.join(" ") });
+  }
+  return { els, cards, headers };
 }
 
-const easeOut = (p: number) => 1 - Math.pow(1 - p, 3);
+// ---------------------------------------------------------------------------
+// Canvas styles
+// ---------------------------------------------------------------------------
+function buildStyle(t: Tokens, dark: boolean, dense: boolean) {
+  const acid = dark ? BRAND.acid : BRAND.acidInk;
+  const neutral = dark ? "#6E7068" : "#8C8E86";
+  const card = dark ? mix(t.surface, "#FFFFFF", 0.02) : t.surface;
+  const cardBorder = dark ? mix(t.surface, "#FFFFFF", 0.1) : mix(t.surface, "#000000", 0.1);
+  const row = dark ? mix(t.surface, "#FFFFFF", 0.045) : mix(t.surface, "#000000", 0.035);
+  const band = dark ? mix(t.background, "#FFFFFF", 0.022) : mix(t.background, "#000000", 0.022);
+  const bandBorder = dark ? mix(t.background, "#FFFFFF", 0.06) : mix(t.background, "#000000", 0.06);
+  const edgeOp = dense ? 0.28 : 0.6;
 
-function drawFx(cy: Core, ctx: CanvasRenderingContext2D, fx: Fx, now: number) {
-  const zoom = Math.max(cy.zoom(), 0.45);
-  fx.rings = fx.rings.filter((r) => now - r.t0 < r.dur);
-  fx.sparks = fx.sparks.filter((s) => now - s.t0 < s.dur);
-  for (const r of fx.rings) {
-    if (now < r.t0) continue;
-    const n = cy.getElementById(r.id);
-    if (n.empty()) continue;
-    const p = (now - r.t0) / r.dur;
-    const { x, y } = n.renderedPosition();
-    const radius = (14 + easeOut(p) * r.max) * zoom;
-    ctx.globalAlpha = (1 - p) * 0.12;
-    ctx.fillStyle = r.color;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = (1 - p) * 0.75;
-    ctx.strokeStyle = r.color;
-    ctx.lineWidth = r.width * (1 - p) + 0.6;
-    ctx.stroke();
-  }
-  for (const s of fx.sparks) {
-    if (now < s.t0) continue;
-    const e = cy.getElementById(s.edge);
-    if (e.empty() || !e.isEdge()) continue;
-    const pts = edgePath(e as EdgeSingular);
-    if (s.reverse) pts.reverse();
-    const p = easeOut((now - s.t0) / s.dur);
-    ctx.fillStyle = s.color;
-    ctx.shadowColor = s.color;
-    // A bright head and a short fading tail.
-    for (let k = 6; k >= 0; k--) {
-      const at = pointAlong(pts, p - k * 0.035);
-      ctx.globalAlpha = k === 0 ? 1 : 0.5 * (1 - k / 7);
-      ctx.shadowBlur = k === 0 ? 12 : 0;
-      ctx.beginPath();
-      ctx.arc(at.x, at.y, (k === 0 ? 3.6 : 2.6 - k * 0.25) * Math.min(1.4, zoom + 0.3), 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.shadowBlur = 0;
-  }
-  ctx.globalAlpha = 1;
-}
-
-/** What the scan HUD says as the scan moves along. */
-const SCAN_PHASES = [
-  "Reading the knowledge graph",
-  "Tracing every reference",
-  "Following imports, types and docs",
-  "Scoring risk and planning fix waves",
-];
-
-// Layout constants (graph units).
-const COL_W = 210;
-const GAP = 76;
-const FIELD_H = 26;
-const FIELD_STEP = 34;
-
-function buildStyle(t: Tokens) {
   const s: { selector: string; style: Record<string, unknown> }[] = [
     {
       selector: "node",
       style: {
-        "font-family": t.font,
-        "font-size": 11,
-        "font-weight": 600,
-        color: t.textPrimary,
-        "text-wrap": "ellipsis",
-        "overlay-opacity": 0,
-        "transition-property": "background-color, border-color, opacity",
-        "transition-duration": 250,
-      },
-    },
-    {
-      selector: "node.district",
-      style: {
+        label: "",
         shape: "round-rectangle",
-        "corner-radius": 16,
-        "background-color": t.surface,
-        "background-opacity": 0.55,
-        "border-width": 1,
-        "border-color": t.border,
-        label: "data(label)",
-        "text-transform": "uppercase",
-        "font-size": 11,
-        color: t.textTertiary,
-        "text-valign": "top",
-        "text-halign": "center",
-        "text-margin-y": -8,
-        padding: 18,
-      },
-    },
-    {
-      selector: "node.asset.compound",
-      style: {
-        shape: "round-rectangle",
-        "corner-radius": 10,
-        "background-color": t.surface,
-        "border-width": 1,
-        "border-color": t.borderStrong,
-        label: "data(label)",
-        "text-valign": "top",
-        "text-halign": "center",
-        "text-margin-y": -5,
-        "font-size": 11.5,
-        padding: 8,
-      },
-    },
-    {
-      selector: "node.asset.leaf",
-      style: {
-        shape: "round-rectangle",
-        "corner-radius": 10,
         width: "data(w)",
         height: "data(h)",
-        "background-color": t.surface,
+        "overlay-opacity": 0,
+        "transition-property": "background-color, border-color, opacity, outline-width",
+        "transition-duration": 220,
+      },
+    },
+    {
+      selector: "node.band",
+      style: {
+        "corner-radius": 18,
+        "background-color": band,
         "border-width": 1,
-        "border-color": t.borderStrong,
-        label: "data(label)",
-        "text-valign": "center",
-        "text-halign": "center",
-        "text-max-width": 168,
-        "font-size": 11.5,
+        "border-color": bandBorder,
+        events: "no",
+        "z-index": 0,
+      },
+    },
+    {
+      selector: "node.asset",
+      style: {
+        "corner-radius": 10,
+        "background-color": card,
+        "border-width": 1,
+        "border-color": cardBorder,
+        "z-index": 10,
+        "outline-color": acid,
+        "outline-opacity": 0.35,
+        "outline-offset": 2,
       },
     },
     {
       selector: "node.field",
       style: {
-        shape: "round-rectangle",
         "corner-radius": 6,
-        width: 168,
-        height: FIELD_H,
-        "background-color": t.surfaceSecondary,
-        "border-width": 1,
-        "border-color": t.border,
-        label: "data(label)",
-        "text-valign": "center",
-        "text-halign": "center",
-        "font-size": 10.5,
-        "font-weight": 500,
-        color: t.textSecondary,
+        "background-color": row,
+        "border-width": 0,
+        "border-color": cardBorder,
+        "z-index": 20,
+        "outline-color": acid,
+        "outline-opacity": 0.35,
       },
     },
-    { selector: "node.untested", style: { "background-opacity": 0.55 } },
-    { selector: "node.pii", style: { "border-style": "double", "border-width": 3 } },
     {
       selector: "edge",
       style: {
-        width: 1.25,
-        "line-color": t.borderStrong,
-        "target-arrow-color": t.borderStrong,
+        width: 1.2,
+        "line-color": neutral,
+        "target-arrow-color": neutral,
         "target-arrow-shape": "triangle",
-        "arrow-scale": 0.75,
-        "curve-style": "taxi",
-        "taxi-direction": "auto",
+        "arrow-scale": 0.7,
+        "curve-style": "round-taxi",
+        "taxi-direction": "rightward",
         "taxi-turn": "50%",
-        "taxi-turn-min-distance": 12,
-        opacity: "data(op)",
+        "taxi-turn-min-distance": 16,
+        "taxi-radius": 12,
+        "source-distance-from-node": 1,
+        "target-distance-from-node": 2,
+        opacity: edgeOp,
+        "z-index": 5,
+        "transition-property": "opacity, line-color, width",
+        "transition-duration": 220,
       },
     },
-    { selector: "edge.bob", style: { "line-style": "dotted" } },
+    { selector: "edge.same", style: { "curve-style": "bezier", "control-point-step-size": 40 } },
+    { selector: "edge.vert", style: { "taxi-direction": "vertical" } },
+    {
+      selector: "edge.bob",
+      style: {
+        "line-color": acid,
+        "target-arrow-color": acid,
+        "line-style": "dashed",
+        "line-dash-pattern": [5, 4],
+        opacity: Math.min(1, edgeOp + 0.2),
+      },
+    },
 
     // Severity (impact analysis).
-    { selector: "node.sev-breaking", style: { "border-color": t.error, "border-width": 2, "background-color": t.errorSoft, "background-opacity": 1, color: t.textPrimary } },
-    { selector: "node.sev-needs_update", style: { "border-color": t.warning, "border-width": 2, "background-color": t.warningSoft, "background-opacity": 1, color: t.textPrimary } },
-    { selector: "node.sev-update", style: { "border-color": t.info, "border-width": 2, "background-color": t.infoSoft, "background-opacity": 1, color: t.textPrimary } },
+    { selector: "node.sev-breaking", style: { "border-color": STATE.impact, "border-width": 1.5, "background-color": mix(card, STATE.impact, dark ? 0.16 : 0.1) } },
+    { selector: "node.sev-needs_update", style: { "border-color": t.warning, "border-width": 1.5, "background-color": mix(card, t.warning, dark ? 0.14 : 0.1) } },
+    { selector: "node.sev-update", style: { "border-color": t.info, "border-width": 1.5, "background-color": mix(card, t.info, dark ? 0.14 : 0.08) } },
     { selector: "node.sev-safe", style: { opacity: 0.45 } },
-    { selector: "edge.impacted", style: { "line-color": t.error, "target-arrow-color": t.error, width: 2, "line-style": "dashed", "line-dash-pattern": [6, 4], opacity: 1 } },
-    { selector: "edge.safe-edge", style: { opacity: 0.3 } },
+    { selector: "edge.impacted", style: { "line-color": STATE.impact, "target-arrow-color": STATE.impact, width: 2, "line-style": "dashed", "line-dash-pattern": [6, 4], opacity: 1, "z-index": 40 } },
+    { selector: "edge.safe-edge", style: { opacity: 0.15 } },
 
     // Building states (live run). Listed after severity so they win.
-    { selector: "node.bs-awaiting_approval", style: { "border-color": t.warning, "border-width": 2, "background-color": t.warningSoft, "background-opacity": 1 } },
-    { selector: "node.bs-under_construction", style: { "border-color": t.warning, "border-width": 2, "border-style": "dashed", "background-color": t.warningSoft, "background-opacity": 1 } },
-    { selector: "node.bs-inspecting", style: { "border-color": t.info, "border-width": 2, "background-color": t.infoSoft, "background-opacity": 1 } },
-    { selector: "node.bs-blocked", style: { "border-color": t.error, "border-width": 3, "background-color": t.errorSoft, "background-opacity": 1 } },
-    { selector: "node.bs-needs_human", style: { "border-color": t.warning, "border-width": 3, "background-color": t.warningSoft, "background-opacity": 1 } },
-    { selector: "node.bs-fixed", style: { "border-color": t.success, "border-width": 2, "border-style": "solid", "background-color": t.successSoft, "background-opacity": 1 } },
-    { selector: "edge.fixed-edge", style: { "line-color": t.success, "target-arrow-color": t.success, "line-style": "solid", width: 1.5 } },
+    { selector: "node.bs-awaiting_approval", style: { "border-color": t.warning, "border-width": 2, "background-color": mix(card, t.warning, 0.14) } },
+    { selector: "node.bs-under_construction", style: { "border-color": t.warning, "border-width": 2, "border-style": "dashed", "background-color": mix(card, t.warning, 0.14) } },
+    { selector: "node.bs-inspecting", style: { "border-color": t.info, "border-width": 2, "background-color": mix(card, t.info, 0.12) } },
+    { selector: "node.bs-blocked", style: { "border-color": STATE.blocked, "border-width": 2.5, "background-color": mix(card, STATE.blocked, 0.16) } },
+    { selector: "node.bs-needs_human", style: { "border-color": t.warning, "border-width": 2.5, "background-color": mix(card, t.warning, 0.16) } },
+    { selector: "node.bs-fixed", style: { "border-color": STATE.fixed, "border-width": 2, "border-style": "solid", "background-color": mix(card, STATE.fixed, 0.14) } },
+    { selector: "edge.fixed-edge", style: { "line-color": STATE.fixed, "target-arrow-color": STATE.fixed, "line-style": "solid", width: 1.75 } },
 
     // Agents (Bob workers).
     {
@@ -296,122 +364,133 @@ function buildStyle(t: Tokens) {
         height: 20,
         "background-color": t.textTertiary,
         "border-width": 2,
-        "border-color": t.surface,
+        "border-color": card,
         label: "data(label)",
         color: "#FFFFFF",
+        "font-family": t.font,
         "font-size": 8,
         "font-weight": 700,
         "text-valign": "center",
         "text-halign": "center",
         "z-index": 999,
-        "z-compound-depth": "top",
         events: "no",
       },
     },
     { selector: "node.agent.st-reading, node.agent.st-verifying", style: { "background-color": t.info } },
     { selector: "node.agent.st-editing, node.agent.st-retrying", style: { "background-color": t.warning } },
-    { selector: "node.agent.st-blocked, node.agent.st-quarantined", style: { "background-color": t.error } },
-    { selector: "node.agent.st-done", style: { "background-color": t.success, width: 14, height: 14, label: "" } },
+    { selector: "node.agent.st-blocked, node.agent.st-quarantined", style: { "background-color": STATE.blocked } },
+    { selector: "node.agent.st-done", style: { "background-color": STATE.fixed, width: 14, height: 14, label: "" } },
 
-    // AI scan: everything dims, then lights up as the scan reaches it.
-    { selector: ".scan-dim", style: { opacity: 0.28 } },
-    { selector: "node.scan-hit", style: { opacity: 1, "border-color": t.info, "border-width": 2, "underlay-color": t.info, "underlay-padding": 5, "underlay-opacity": 0.14, "underlay-shape": "round-rectangle" } },
-    { selector: "edge.scan-edge", style: { opacity: 0.9, "line-color": t.info, "target-arrow-color": t.info, width: 1.75 } },
-    // Breaking nodes glow; the glow pulses (see the animation loop).
-    { selector: "node.sev-breaking", style: { "underlay-color": t.error, "underlay-padding": 7, "underlay-opacity": 0.16, "underlay-shape": "round-rectangle" } },
-
-    // Focus and filters.
-    { selector: "node.focus", style: { "border-color": t.textPrimary, "border-width": 2.5 } },
-    { selector: "edge.near", style: { opacity: 0.95, width: 1.75, "line-color": t.textSecondary, "target-arrow-color": t.textSecondary } },
-    { selector: ".faded", style: { opacity: 0.12 } },
+    // Focus, paths and the layer filter.
+    { selector: "node.ctx", style: { opacity: 0.28 } },
+    { selector: "node.ctx-near", style: { opacity: 0.72 } },
+    { selector: "edge.ctx", style: { opacity: 0.08 } },
+    { selector: "edge.lane", style: { opacity: 0.85 } },
+    { selector: ".dim", style: { opacity: 0.2 } },
+    { selector: "edge.dim", style: { opacity: 0.07 } },
+    { selector: "node.hover", style: { "border-color": dark ? mix(t.surface, "#FFFFFF", 0.32) : mix(t.surface, "#000000", 0.32) } },
+    { selector: "edge.hoverpath", style: { "line-color": t.textPrimary, "target-arrow-color": t.textPrimary, width: 1.6, opacity: 0.85, "z-index": 30 } },
+    { selector: "edge.hoverpath.bob", style: { "line-color": acid, "target-arrow-color": acid } },
+    { selector: "edge.path", style: { "line-color": acid, "target-arrow-color": acid, width: 2, opacity: 1, "z-index": 50 } },
+    { selector: "node.onpath", style: { "border-color": dark ? mix(acid, t.surface, 0.45) : mix(acid, t.surface, 0.35) } },
+    { selector: "node.focus", style: { "border-color": acid, "border-width": 1.5, "outline-width": 4 } },
   ];
   return s as unknown as cytoscape.StylesheetStyle[];
 }
 
-function buildElements(graph: Graph) {
-  const { out } = indexGraph(graph);
-  const children = new Map<string, string[]>();
-  for (const n of graph.nodes) {
-    if (n.parent) children.set(n.parent, [...(children.get(n.parent) ?? []), n.id]);
-  }
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const els: ElementDefinition[] = [];
-  let maxY = 0;
-
-  const placeAsset = (id: string, district: string, cx: number, top: number): number => {
-    const n = byId.get(id)!;
-    const kids = children.get(id) ?? [];
-    const flags = [n.pii ? "pii" : "", n.tested ? "" : "untested"].filter(Boolean).join(" ");
-    if (kids.length > 0) {
-      els.push({ data: { id, label: n.name, parent: district }, classes: `asset compound ${flags}` });
-      kids.forEach((kid, i) => {
-        const k = byId.get(kid)!;
-        const short = k.name.includes(".") ? k.name.split(".").slice(1).join(".") : k.name;
-        els.push({
-          data: { id: kid, label: short, parent: id },
-          position: { x: cx, y: top + 24 + i * FIELD_STEP },
-          classes: `field ${k.pii ? "pii" : ""}`,
-        });
-      });
-      return 24 + kids.length * FIELD_STEP + 22;
-    }
-    // Building height shows fan-out: how many things depend on it.
-    const fan = (out.get(id) ?? []).length;
-    const h = 34 + Math.min(fan, 6) * 6;
-    els.push({
-      data: { id, label: n.name, parent: district, w: 184, h },
-      position: { x: cx, y: top + h / 2 },
-      classes: `asset leaf ${flags}`,
-    });
-    return h + 26;
-  };
-
-  // Districts left to right. A tall district wraps into more sub-columns
-  // so the city keeps a sensible shape.
-  const columns = graph.layers.filter((l) => l.column >= 0).sort((a, b) => a.column - b.column);
-  const tallest = Math.max(...columns.map((l) => graph.nodes.filter((n) => n.layer === l.id).length));
-  const maxColumnHeight = Math.max(900, Math.min(1500, tallest * 22));
-  const estimate = (id: string) => {
-    const kids = children.get(id)?.length ?? 0;
-    return kids > 0 ? 24 + kids * FIELD_STEP + 22 : 34 + Math.min((out.get(id) ?? []).length, 6) * 6 + 26;
-  };
-  let x = 0;
-  for (const layer of columns) {
-    const district = `district:${layer.id}`;
-    els.push({ data: { id: district, label: layer.label }, classes: "district", selectable: false });
-    let cx = x + COL_W / 2;
-    let y = 0;
-    for (const n of graph.nodes.filter((nd) => nd.layer === layer.id && !nd.parent)) {
-      if (y > 0 && y + estimate(n.id) > maxColumnHeight) {
-        cx += COL_W + 24;
-        y = 0;
-      }
-      y += placeAsset(n.id, district, cx, y);
-      maxY = Math.max(maxY, y);
-    }
-    x = cx + COL_W / 2 + GAP;
-  }
-
-  // Tests and docs sit in a row under the city.
-  const qDistrict = "district:quality";
-  els.push({ data: { id: qDistrict, label: "Tests and docs" }, classes: "district", selectable: false });
-  const qLabel = graph.layers.find((l) => l.column < 0)?.label ?? "Tests and docs";
-  els[els.length - 1].data.label = qLabel;
-  graph.nodes
-    .filter((n) => n.layer === "quality" && !n.parent)
-    .forEach((n, i) => placeAsset(n.id, qDistrict, i * (COL_W + GAP) + COL_W / 2, maxY + 90));
-
-  // Big graphs get quieter roads; focus and impact bring them forward.
-  const op = graph.edges.length > 150 ? 0.35 : 0.85;
-  for (const e of graph.edges) {
-    els.push({
-      data: { id: e.id, source: e.from, target: e.to, type: e.type, op },
-      classes: e.source === "bob" ? "bob" : "",
-    });
-  }
-  return els;
+/** Mixes two #rrggbb colours. */
+function mix(a: string, b: string, t: number) {
+  const p = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [ar, ag, ab] = p(a);
+  const [br, bg, bb] = p(b);
+  return (
+    "#" +
+    [ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t]
+      .map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0"))
+      .join("")
+  );
 }
 
+// ---------------------------------------------------------------------------
+// Overlay content
+// ---------------------------------------------------------------------------
+function Hatch() {
+  return (
+    <span
+      aria-hidden
+      title="No tests"
+      className="absolute top-0 right-0 size-4 text-text-tertiary opacity-70"
+      style={{
+        clipPath: "polygon(0 0, 100% 0, 100% 100%)",
+        backgroundImage: "repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 4px)",
+      }}
+    />
+  );
+}
+
+function Glyphs({ card, dark }: { card: Card; dark: boolean }) {
+  const n = card.node;
+  return (
+    <span className="flex items-center gap-1.5 shrink-0">
+      {card.pii ? <ShieldAlert className="size-3" style={{ color: STATE.pii }} aria-label="Personal data" /> : null}
+      {card.bob > 0 ? (
+        <span
+          className="font-mono text-[9.5px] leading-none px-1 py-[2px] rounded-[4px] border border-dashed"
+          style={{ color: dark ? BRAND.acid : BRAND.acidInk, borderColor: dark ? "rgba(216,245,63,0.45)" : "rgba(107,127,0,0.45)" }}
+          title={`${card.bob} links found by Bob`}
+        >
+          {card.bob}
+        </span>
+      ) : null}
+      {n.criticality === "high" ? (
+        <span
+          className="size-[7px] rounded-full"
+          style={{ background: BRAND.acid, boxShadow: dark ? undefined : "0 0 0 1px rgba(14,15,12,0.35)" }}
+          title="High criticality"
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function CardView({ card, dark }: { card: Card; dark: boolean }) {
+  if (card.kind === "field") {
+    return (
+      <div className="h-full flex items-center justify-between gap-2 pl-2.5 pr-2">
+        <span className="truncate text-[12px] font-medium text-text-secondary">{card.label}</span>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {card.pii ? <span className="size-[6px] rounded-full" style={{ background: STATE.pii }} title="Personal data" /> : null}
+          {card.bob > 0 ? (
+            <span className="font-mono text-[9.5px]" style={{ color: dark ? BRAND.acid : BRAND.acidInk }}>
+              {card.bob}
+            </span>
+          ) : null}
+          <span className="font-mono text-[9.5px] text-text-tertiary">{typeLabel(card.node.type)}</span>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="relative h-full rounded-[10px] overflow-hidden">
+      <span className="absolute left-[5px] top-[10px] w-[3px] rounded-full" style={{ background: card.accent, height: card.kind === "box" ? HEAD_H - 20 : card.h - 20 }} />
+      {!card.node.tested ? <Hatch /> : null}
+      <div className="pl-[15px] pr-3 pt-[9px] flex flex-col gap-[3px]" style={{ height: card.kind === "box" ? HEAD_H : card.h }}>
+        <span className="truncate text-[13.5px] leading-[18px] font-semibold text-text-primary tracking-[-0.005em]">{card.label}</span>
+        <span className="flex items-center justify-between gap-2">
+          <span className="truncate font-mono text-[10.5px] leading-[14px] text-text-tertiary">
+            {typeLabel(card.node.type)}
+            {card.kind === "box" ? ` · ${Math.round((card.h - HEAD_H - BOX_PAD + ROW_GAP) / (ROW_H + ROW_GAP))}` : ""}
+          </span>
+          <Glyphs card={card} dark={dark} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export function CityMap({
   graph,
   selectedId,
@@ -419,25 +498,26 @@ export function CityMap({
   severity,
   revealLevels,
   rippleKey,
+  scanning = null,
   buildingState,
   agents,
   layerFilter = "all",
-  fullscreen = true,
-  scanning = null,
   className,
 }: CityMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const fxCanvasRef = useRef<HTMLCanvasElement>(null);
-  const fxRef = useRef<Fx>({ rings: [], sparks: [], epicenter: null, lastEpicenter: 0, scanSource: null, lastScan: 0, reduced: false });
-  const colors = useRef<Tokens | null>(null);
-  const { ref: fsRef, isFullscreen, toggle: toggleFullscreen } = useFullscreen<HTMLDivElement>();
-  const [replay, setReplay] = useState(0);
-  const [ripple, setRipple] = useState<{ wave: number; waves: number; hit: number; total: number } | null>(null);
-  const [scan, setScan] = useState<{ nodes: number; edges: number; totalEdges: number; progress: number } | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const onSelectRef = useRef(onSelect);
+  const cardEls = useRef(new Map<string, HTMLDivElement>());
+  const selectedRef = useRef<string | null | undefined>(selectedId);
+  const layerRef = useRef<LayerId | "all">(layerFilter);
+  const hoverRef = useRef<string | null>(null);
+  const applyRef = useRef<() => void>(() => {});
+  const fitRef = useRef<(animate: boolean) => void>(() => {});
+  const userMovedRef = useRef(false);
   const isDark = useIsDark();
-  const elements = useMemo(() => buildElements(graph), [graph]);
+  const layout = useMemo(() => buildLayout(graph), [graph]);
+  const dense = graph.edges.length > 150;
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -445,87 +525,155 @@ export function CityMap({
 
   // Create the map once per graph.
   useEffect(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
     const cy = cytoscape({
-      container: containerRef.current,
-      elements,
+      container,
+      elements: layout.els,
       layout: { name: "preset" },
-      style: buildStyle(readTokens()),
-      minZoom: 0.25,
-      maxZoom: 2.2,
+      style: buildStyle(readTokens(), document.documentElement.classList.contains("dark"), dense),
+      minZoom: 0.12,
+      maxZoom: 2.4,
       boxSelectionEnabled: false,
       autoungrabify: true,
+      wheelSensitivity: 0.35,
     });
     cyRef.current = cy;
-    cy.fit(undefined, 36);
+
+    // Keep the overlay glued to the viewport.
+    const syncViewport = () => {
+      const o = overlayRef.current;
+      if (!o) return;
+      const p = cy.pan();
+      const z = cy.zoom();
+      o.style.transform = `translate(${p.x}px, ${p.y}px) scale(${z})`;
+      o.dataset.lod = z < 0.3 ? "low" : "high";
+    };
+    let raf = 0;
+    const syncOpacity = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        for (const [id, el] of cardEls.current) {
+          const ele = cy.getElementById(id);
+          if (ele.empty()) continue;
+          el.style.opacity = String(ele.style("opacity"));
+        }
+      });
+    };
+    cy.on("viewport", syncViewport);
+    cy.on("class style", "node", syncOpacity);
+
+    const nodeOwner = (ids: Collection) => ids.union(cy.nodes().filter((n) => ids.some((m) => m.data("owner") === n.id())));
+
+    // Focus: layer filter (context), then hover or selection paths.
+    const apply = () => {
+      const lf = layerRef.current;
+      const sel = selectedRef.current;
+      const hov = hoverRef.current;
+      cy.batch(() => {
+        cy.elements().removeClass("ctx ctx-near lane dim path hoverpath onpath focus hover");
+        const content = cy.nodes(".asset, .field");
+        if (lf !== "all") {
+          const inLayer = content.filter((n) => n.data("layer") === lf);
+          const lanes = inLayer.connectedEdges();
+          let near = lanes.connectedNodes().difference(inLayer);
+          near = near.union(near.map((n) => cy.getElementById(n.data("owner") ?? "")).reduce((c, e) => c.union(e), cy.collection()));
+          content.difference(inLayer).addClass("ctx");
+          near.removeClass("ctx").addClass("ctx-near");
+          cy.nodes(".band").filter((b) => b.data("layer") !== lf).addClass("ctx");
+          cy.edges().difference(lanes).addClass("ctx");
+          lanes.addClass("lane");
+        }
+        const focusId = sel ?? hov;
+        if (focusId) {
+          const n = cy.getElementById(focusId);
+          if (n.nonempty() && !n.hasClass("band")) {
+            const group = n.union(cy.nodes().filter((c) => c.data("owner") === n.id()));
+            const up = group.predecessors();
+            const down = group.successors();
+            const pathNodes = group.union(up.nodes()).union(down.nodes());
+            const pathEdges = up.edges().union(down.edges());
+            const keep = nodeOwner(pathNodes).union(pathNodes.map((p) => cy.getElementById(p.data("owner") ?? "")).reduce((c, e) => c.union(e), cy.collection()));
+            content.difference(keep).addClass("dim");
+            cy.edges().difference(pathEdges).addClass("dim");
+            keep.removeClass("ctx ctx-near");
+            pathEdges.removeClass("ctx");
+            if (sel) {
+              pathEdges.addClass("path");
+              pathNodes.difference(group).addClass("onpath");
+              n.addClass("focus");
+            } else {
+              pathEdges.addClass("hoverpath");
+              n.addClass("hover");
+            }
+          }
+        }
+      });
+      syncOpacity();
+    };
+    applyRef.current = apply;
+
+    const fitTarget = () => {
+      const lf = layerRef.current;
+      if (lf === "all") return cy.nodes(".band, .asset, .field");
+      const band = cy.getElementById(`band:${lf}`);
+      const inLayer = cy.nodes(".asset, .field").filter((n) => n.data("layer") === lf);
+      if (inLayer.empty()) return cy.nodes(".band, .asset, .field");
+      return band.union(inLayer).union(inLayer.connectedEdges().connectedNodes());
+    };
+    const fit = (animate: boolean) => {
+      const eles = fitTarget();
+      const padding = layerRef.current === "all" ? 20 : 48;
+      if (animate) cy.animate({ fit: { eles, padding }, duration: 520, easing: "ease-in-out-cubic" });
+      else cy.fit(eles, padding);
+    };
+    fitRef.current = fit;
+    fit(false);
+    syncViewport();
+    apply();
 
     cy.on("tap", "node", (evt) => {
       const n = evt.target;
-      if (n.hasClass("district") || n.hasClass("agent")) return;
+      if (n.hasClass("band") || n.hasClass("agent")) return;
       onSelectRef.current?.(n.id());
     });
     cy.on("tap", (evt) => {
       if (evt.target === cy) onSelectRef.current?.(null);
     });
+    cy.on("mouseover", "node.asset, node.field", (evt) => {
+      hoverRef.current = evt.target.id();
+      container.style.cursor = "pointer";
+      if (!selectedRef.current) apply();
+    });
+    cy.on("mouseout", "node.asset, node.field", () => {
+      hoverRef.current = null;
+      container.style.cursor = "";
+      if (!selectedRef.current) apply();
+    });
 
-    const fx = fxRef.current;
-    fx.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const canvas = fxCanvasRef.current;
-    const ctx = canvas?.getContext("2d") ?? null;
-    const sizeCanvas = () => {
-      if (!canvas || !containerRef.current) return;
-      const dpr = window.devicePixelRatio || 1;
-      const { clientWidth: w, clientHeight: h } = containerRef.current;
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
-      ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    sizeCanvas();
-
-    // Moving "traffic" on impacted roads, pulsing glow on breaking nodes, rings and sparks.
+    // Moving "traffic" on impacted roads.
     let offset = 0;
     let frame = 0;
-    let wasDrawing = false;
     const tick = () => {
-      const now = performance.now();
       offset = (offset - 0.6) % 1000;
       const impacted = cy.edges(".impacted");
       if (impacted.nonempty()) impacted.style("line-dash-offset", offset);
-      const tokens = colors.current;
-      if (!fx.reduced && tokens) {
-        const breaking = cy.nodes(".sev-breaking");
-        if (breaking.nonempty()) breaking.style("underlay-opacity", 0.1 + 0.14 * (0.5 + 0.5 * Math.sin(now / 260)));
-        if (fx.epicenter && now - fx.lastEpicenter > 1500) {
-          fx.lastEpicenter = now;
-          fx.rings.push({ id: fx.epicenter, t0: now, dur: 1700, color: tokens.error, max: 150, width: 2.5 });
-        }
-        if (fx.scanSource && now - fx.lastScan > 650) {
-          fx.lastScan = now;
-          fx.rings.push({ id: fx.scanSource, t0: now, dur: 1400, color: tokens.info, max: 260, width: 2 });
-        }
-      }
-      if (ctx && canvas) {
-        const drawing = fx.rings.length > 0 || fx.sparks.length > 0;
-        if (drawing || wasDrawing) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          if (drawing) drawFx(cy, ctx, fx, now);
-        }
-        wasDrawing = drawing;
-      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
 
-    // Redraw straight away after a resize (for example when a scrollbar appears),
-    // so the map never shows a blank frame.
+    // Fill the canvas: refit on resize until the person pans or zooms.
+    const markMoved = () => (userMovedRef.current = true);
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.buttons) markMoved();
+    };
+    container.addEventListener("wheel", markMoved, { passive: true });
+    container.addEventListener("pointermove", onPointerMove);
     const ro = new ResizeObserver(() => {
       cy.resize();
-      cy.forceRender();
-      sizeCanvas();
+      if (!userMovedRef.current && !selectedRef.current) fit(false);
     });
-    ro.observe(containerRef.current);
+    ro.observe(container);
 
     const unregister = registerSnapshot(() =>
       cy.png({ output: "base64uri", full: true, scale: 2, bg: readTokens().background }),
@@ -534,48 +682,30 @@ export function CityMap({
     return () => {
       unregister();
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(raf);
       ro.disconnect();
+      container.removeEventListener("wheel", markMoved);
+      container.removeEventListener("pointermove", onPointerMove);
       cy.destroy();
       cyRef.current = null;
     };
-  }, [elements]);
+  }, [layout, dense]);
 
-  // Entering or leaving full screen changes the size: refit once the new size has settled.
+  // Re-theme when light/dark changes.
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const t = setTimeout(() => {
-      cy.resize();
-      cy.stop(true, true);
-      cy.fit(undefined, 36);
-    }, 120);
-    return () => clearTimeout(t);
-  }, [isFullscreen]);
-
-  // Re-theme when light/dark changes. The effects layer reads its colours from here.
-  useEffect(() => {
-    colors.current = readTokens();
-    cyRef.current?.style(buildStyle(colors.current));
-  }, [isDark]);
+    cyRef.current?.style(buildStyle(readTokens(), isDark, dense));
+  }, [isDark, dense]);
 
   // Severity, with an optional wave-by-wave ripple.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    const fx = fxRef.current;
     const sevClasses = "sev-breaking sev-needs_update sev-update sev-safe";
     cy.batch(() => {
-      cy.nodes().removeClass(sevClasses).removeStyle("underlay-opacity");
+      cy.nodes().removeClass(sevClasses);
       cy.edges().removeClass("impacted safe-edge");
     });
-    fx.epicenter = null;
-    fx.rings = fx.rings.filter((r) => r.id === fx.scanSource);
-    fx.sparks = [];
-    setRipple(null);
     if (!severity) return;
-    const tokens = colors.current ?? readTokens();
-    const sevColor: Record<Severity, string> = { breaking: tokens.error, needs_update: tokens.warning, update: tokens.info, safe: tokens.textTertiary };
-    const affected = Object.values(severity).filter((v) => v !== "safe").length;
 
     const paintEdges = () => {
       cy.batch(() => {
@@ -597,134 +727,19 @@ export function CityMap({
         }
       });
 
-    // Each hit node sends out a ring in its colour and "pops". Sparks run down the
-    // roads into the nodes this wave reaches, so the ripple visibly travels.
-    const burst = (ids: string[], wave: number) => {
-      if (fx.reduced) return;
-      const now = performance.now();
-      const hit = new Set(ids);
-      for (const id of ids) {
-        const s = severity[id];
-        if (!s || s === "safe") continue;
-        fx.rings.push({ id, t0: now + Math.random() * 120, dur: 1100, color: sevColor[s], max: wave === 0 ? 120 : 70, width: wave === 0 ? 3 : 2 });
-        const n = cy.getElementById(id);
-        if (n.nonempty() && !n.isParent()) {
-          n.animate(
-            { style: { "border-width": 5 } },
-            { duration: 160, complete: () => void n.animate({ style: { "border-width": 2 } }, { duration: 280, complete: () => void n.removeStyle("border-width") }) },
-          );
-        }
-      }
-      if (wave === 0) return;
-      let count = 0;
-      cy.edges().forEach((e) => {
-        if (count > 60) return;
-        const src = e.source().id();
-        const tgt = e.target().id();
-        const into = hit.has(tgt) && severity[src] && severity[src] !== "safe" && !hit.has(src);
-        const back = hit.has(src) && severity[tgt] && severity[tgt] !== "safe" && !hit.has(tgt);
-        if (!into && !back) return;
-        const s = severity[into ? tgt : src]!;
-        fx.sparks.push({ edge: e.id(), t0: now, dur: 520, color: sevColor[s], reverse: Boolean(back) });
-        count++;
-      });
-    };
-
     if (!revealLevels) {
       paint(Object.keys(severity));
       paintEdges();
       return;
     }
-    fx.epicenter = revealLevels[0]?.[0] ?? null;
-    // Zoom to the part of the city the change reaches, so the ripple is easy to follow.
-    const reach = cy.collection();
-    for (const id of Object.keys(severity)) {
-      if (severity[id] === "safe") continue;
-      const n = cy.getElementById(id);
-      if (n.nonempty()) reach.merge(n.isChild() && n.parent().nonempty() && !n.parent().first().hasClass("district") ? n.parent() : n);
-    }
-    if (reach.nonempty()) cy.animate({ fit: { eles: reach, padding: 70 }, duration: 650, easing: "ease-in-out-cubic" });
-    fx.lastEpicenter = performance.now() + revealLevels.length * 420;
-    const waves = revealLevels.length;
-    let hitSoFar = 0;
     const timers = revealLevels.map((ids, i) =>
       setTimeout(() => {
         paint(ids);
         paintEdges();
-        burst(ids, i);
-        hitSoFar += ids.filter((id) => severity[id] && severity[id] !== "safe").length;
-        setRipple({ wave: i + 1, waves, hit: Math.min(hitSoFar, affected), total: affected });
       }, i * 420),
     );
     return () => timers.forEach(clearTimeout);
-  }, [severity, revealLevels, rippleKey, elements, replay]);
-
-  // AI scan: a wave of light spreads out from the node through every link,
-  // while rings pulse from the start node. Plays while `scanning` is set.
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const fx = fxRef.current;
-    const info = (colors.current ?? readTokens()).info;
-    const clear = () => {
-      cy.batch(() => cy.elements().removeClass("scan-dim scan-hit scan-edge"));
-      fx.scanSource = null;
-      fx.rings = fx.rings.filter((r) => r.color !== info);
-      fx.sparks = fx.sparks.filter((sp) => sp.color !== info);
-    };
-    // Leaving the scan is handled by the cleanup below; the HUD hides when `scanning` is null.
-    if (!scanning) return;
-    const start = cy.getElementById(scanning);
-    if (start.empty()) return;
-    fx.scanSource = scanning;
-    fx.lastScan = 0;
-
-    // Breadth-first, in both directions, one step at a time.
-    type Step = { nodes: cytoscape.NodeCollection; edges: cytoscape.EdgeCollection };
-    let frontier: cytoscape.NodeCollection = start.union(start.children()).union(start.parent().not(".district")).nodes();
-    let seen = frontier as unknown as cytoscape.Collection;
-    const steps: Step[] = [{ nodes: frontier, edges: cy.collection().edges() }];
-    while (steps.length < 14) {
-      const edges = frontier.connectedEdges().filter((e) => !seen.has(e));
-      if (edges.empty()) break;
-      const raw = edges.connectedNodes().not(seen);
-      const next = raw.union(raw.parent().not(".district")).not(seen).nodes();
-      seen = seen.union(edges).union(next);
-      steps.push({ nodes: next, edges });
-      if (next.empty()) break;
-      frontier = next.union(next.children()).nodes();
-    }
-
-    const totalEdges = cy.edges().length;
-    cy.batch(() => cy.elements().not(".district, .agent").addClass("scan-dim"));
-    const stepMs = Math.max(160, Math.min(420, 2200 / steps.length));
-    let nodes = 0;
-    let links = 0;
-    const timers = steps.map((st, i) =>
-      setTimeout(() => {
-        cy.batch(() => {
-          st.nodes.removeClass("scan-dim").addClass("scan-hit");
-          st.edges.removeClass("scan-dim").addClass("scan-edge");
-        });
-        nodes += st.nodes.filter((n) => !n.isParent()).length;
-        links += st.edges.length;
-        if (!fx.reduced) {
-          const now = performance.now();
-          const reached = new Set(st.nodes.map((n) => n.id()));
-          st.edges.slice(0, 70).forEach((e) => {
-            fx.sparks.push({ edge: e.id(), t0: now + Math.random() * 90, dur: stepMs + 160, color: info, reverse: reached.has(e.source().id()) });
-          });
-        }
-        setScan({ nodes, edges: links, totalEdges, progress: (i + 1) / steps.length });
-      }, i * stepMs),
-    );
-    // After the walk, every link has been checked.
-    timers.push(setTimeout(() => setScan({ nodes, edges: totalEdges, totalEdges, progress: 1 }), steps.length * stepMs + 200));
-    return () => {
-      timers.forEach(clearTimeout);
-      clear();
-    };
-  }, [scanning, elements]);
+  }, [severity, revealLevels, rippleKey, layout]);
 
   // Building states from a live run.
   useEffect(() => {
@@ -738,16 +753,12 @@ export function CityMap({
       for (const [unit, state] of Object.entries(buildingState ?? {})) {
         const el = cy.getElementById(unit);
         if (el.empty()) continue;
-        el.addClass(`bs-${state}`);
-        el.children().addClass(`bs-${state}`);
-        if (state === "fixed") {
-          el.union(el.children()).incomers("edge.impacted").addClass("fixed-edge");
-          // A fixed building stops glowing red.
-          el.union(el.children()).removeClass("sev-breaking").removeStyle("underlay-opacity");
-        }
+        const group = el.union(cy.nodes().filter((n) => n.data("owner") === unit));
+        group.addClass(`bs-${state}`);
+        if (state === "fixed") group.incomers("edge.impacted").addClass("fixed-edge");
       }
     });
-  }, [buildingState, elements]);
+  }, [buildingState, layout]);
 
   // Agents walk from the city gate to the building they work on.
   useEffect(() => {
@@ -757,7 +768,7 @@ export function CityMap({
     cy.nodes(".agent").forEach((n) => {
       if (!wanted.has(n.id())) n.remove();
     });
-    const gate = { x: -COL_W, y: -40 };
+    const gate = { x: -CARD_W, y: -40 };
     for (const a of agents ?? []) {
       const target = cy.getElementById(a.unit);
       if (target.empty()) continue;
@@ -773,152 +784,117 @@ export function CityMap({
         node.classes(cls);
       }
     }
-  }, [agents, elements]);
+  }, [agents, layout]);
 
-  // Focus: selected node, its neighbours, and the layer filter.
+  // Selection: highlight paths and bring the neighbourhood into view.
   useEffect(() => {
+    selectedRef.current = selectedId;
+    applyRef.current();
     const cy = cyRef.current;
-    if (!cy) return;
-    cy.batch(() => {
-      cy.elements().removeClass("faded focus near");
-      if (layerFilter !== "all") {
-        cy.nodes().forEach((n) => {
-          if (n.hasClass("agent")) return;
-          const districtId = n.hasClass("district") ? n.id() : n.ancestors(".district").first().id();
-          if (districtId !== `district:${layerFilter}`) n.addClass("faded");
-        });
-        cy.edges().addClass("faded");
-      }
-      if (selectedId) {
-        const n = cy.getElementById(selectedId);
-        if (n.nonempty()) {
-          n.addClass("focus");
-          const group = n.union(n.children());
-          const keep = group
-            .union(group.connectedEdges())
-            .union(group.connectedEdges().connectedNodes());
-          const withParents = keep.union(keep.nodes().ancestors());
-          cy.elements().not(withParents).not(".agent").addClass("faded");
-          withParents.removeClass("faded");
-          group.connectedEdges().addClass("near");
-        }
-      }
-    });
-    // Bring the selected node and its neighbours into view.
-    if (selectedId) {
-      const n = cy.getElementById(selectedId);
-      if (n.nonempty()) {
-        const group = n.union(n.children());
-        const around = group.union(group.connectedEdges().connectedNodes());
-        cy.animate({ fit: { eles: around, padding: 60 }, duration: 350, easing: "ease-in-out-cubic" });
-      }
+    if (!cy || !selectedId) return;
+    const n = cy.getElementById(selectedId);
+    if (n.empty()) return;
+    const group = n.union(cy.nodes().filter((c) => c.data("owner") === n.id()));
+    const around = group.union(group.connectedEdges().connectedNodes());
+    const bb = around.boundingBox();
+    const fitsNow = cy.extent();
+    // Only move when the neighbourhood is not already comfortably visible.
+    const visible = bb.x1 >= fitsNow.x1 && bb.x2 <= fitsNow.x2 && bb.y1 >= fitsNow.y1 && bb.y2 <= fitsNow.y2;
+    if (!visible || cy.zoom() < 0.45) {
+      cy.animate({ fit: { eles: around, padding: 80 }, duration: 380, easing: "ease-in-out-cubic" });
+      userMovedRef.current = true;
     }
-  }, [selectedId, layerFilter, elements]);
+  }, [selectedId, layout]);
+
+  // Layer filter: keep context, zoom to the layer and its direct neighbours.
+  useEffect(() => {
+    const changed = layerRef.current !== layerFilter;
+    layerRef.current = layerFilter;
+    applyRef.current();
+    if (changed) {
+      userMovedRef.current = false;
+      fitRef.current(true);
+    }
+  }, [layerFilter, layout]);
 
   const zoomBy = (factor: number) => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+    userMovedRef.current = true;
+    cy.animate({
+      zoom: { level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } },
+      duration: 160,
+    });
   };
 
   const iconBtn =
-    "cursor-pointer flex items-center justify-center size-9 bg-surface border border-border rounded-lg text-icon-secondary hover:text-text-primary hover:bg-surface-hover hover:border-border-strong shadow-2xs active:scale-95 transition-all duration-150";
-  const phase = scan ? SCAN_PHASES[Math.min(SCAN_PHASES.length - 1, Math.floor(scan.progress * SCAN_PHASES.length))] : "";
+    "cursor-pointer flex items-center justify-center size-8 rounded-md text-icon-secondary hover:text-text-primary hover:bg-surface-hover active:scale-95 transition-all duration-150";
 
   return (
-    <div
-      ref={fsRef}
-      className={cn(
-        "relative rounded-xl border border-border overflow-hidden city-canvas",
-        className,
-        isFullscreen && "!h-auto rounded-none border-0 bg-background",
-      )}
-    >
+    <div className={cn("relative rounded-xl border border-border overflow-hidden city-canvas", scanning && "ai-glow", className)}>
+      {scanning ? (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-3 h-7 rounded-full border border-border bg-surface/90 backdrop-blur font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-secondary pointer-events-none">
+          <span className="size-1.5 rounded-full bg-brand animate-pulse" />
+          Scanning the graph
+        </div>
+      ) : null}
       {/* Cytoscape sets its own container to position: relative, so it needs a sized wrapper. */}
       <div className="absolute inset-0">
         <div ref={containerRef} className="w-full h-full" />
       </div>
-      <canvas ref={fxCanvasRef} className="absolute inset-0 pointer-events-none" aria-hidden />
-
-      {/* AI scan HUD. */}
-      {scanning && scan ? (
-        <div className="absolute top-3 left-3 right-16 sm:right-auto flex flex-col gap-2 sm:w-80 px-3.5 py-3 rounded-xl border border-border bg-surface/90 backdrop-blur-sm shadow-xs select-none animate-in fade-in slide-in-from-top-1 duration-300">
-          <div className="flex items-center gap-2">
-            <span className="relative flex size-5 items-center justify-center rounded-md bg-info-soft text-info">
-              <Sparkles className="size-3.5 animate-pulse" />
-              <span className="absolute inset-0 rounded-md ring-2 ring-info/40 animate-ping" />
-            </span>
-            <span className="text-body font-semibold text-text-primary">AI is analysing the graph</span>
-          </div>
-          <span key={phase} className="type-caption animate-in fade-in duration-300">
-            {phase}…
-          </span>
-          <div className="h-1.5 rounded-full bg-surface-secondary overflow-hidden">
-            <div className="h-full rounded-full bg-info transition-[width] duration-300 ease-out ai-bar" style={{ width: `${Math.round(8 + scan.progress * 92)}%` }} />
-          </div>
-          <span className="type-caption tabular-nums">
-            {scan.edges} of {scan.totalEdges} links checked · {scan.nodes} components reached
-          </span>
+      <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
+        <div ref={overlayRef} className="absolute left-0 top-0 origin-top-left group/lod" data-lod="high">
+          {layout.headers.map((h) => (
+            <div
+              key={h.id}
+              ref={(el) => {
+                if (el) cardEls.current.set(`band:${h.id}`, el);
+                else cardEls.current.delete(`band:${h.id}`);
+              }}
+              className="absolute flex items-center justify-between px-4 transition-opacity duration-200"
+              style={{ left: h.x, top: h.y, width: h.w, height: BAND_HEAD - 6 }}
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="size-[7px] rounded-full shrink-0" style={{ background: h.accent }} />
+                <span className="truncate text-[12px] font-semibold uppercase tracking-[0.09em] text-text-secondary">{h.label}</span>
+              </span>
+              <span className="font-mono text-[11px] text-text-tertiary tabular-nums">{h.count}</span>
+            </div>
+          ))}
+          {layout.cards.map((c) => (
+            <div
+              key={c.id}
+              ref={(el) => {
+                if (el) cardEls.current.set(c.id, el);
+                else cardEls.current.delete(c.id);
+              }}
+              className="absolute transition-opacity duration-200 group-data-[lod=low]/lod:invisible"
+              style={{ left: c.x, top: c.y, width: c.w, height: c.kind === "box" ? HEAD_H : c.h }}
+            >
+              <CardView card={c} dark={isDark} />
+            </div>
+          ))}
         </div>
-      ) : ripple ? (
-        <div className="absolute top-3 left-3 flex items-center gap-2.5 pl-3 pr-1.5 py-1.5 rounded-xl border border-border bg-surface/90 backdrop-blur-sm shadow-xs select-none animate-in fade-in slide-in-from-top-1 duration-300">
-          <span className="relative flex size-2.5">
-            {ripple.wave < ripple.waves ? <span className="absolute inset-0 rounded-full bg-error animate-ping" /> : null}
-            <span className="relative size-2.5 rounded-full bg-error" />
-          </span>
-          <span className="text-body text-text-secondary tabular-nums">
-            {ripple.wave < ripple.waves ? (
-              <>
-                Ripple spreading · step <span className="font-semibold text-text-primary">{ripple.wave}</span> of {ripple.waves} ·{" "}
-                <span className="font-semibold text-text-primary">{ripple.hit}</span> hit
-              </>
-            ) : (
-              <>
-                Ripple reached <span className="font-semibold text-text-primary">{ripple.total}</span> components in {ripple.waves} {ripple.waves === 1 ? "step" : "steps"}
-              </>
-            )}
-          </span>
-          <button
-            className="cursor-pointer flex items-center justify-center size-7 rounded-lg text-icon-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
-            onClick={() => setReplay((r) => r + 1)}
-            aria-label="Replay the ripple"
-            title="Replay the ripple"
-          >
-            <RotateCcw className="size-3.5" />
-          </button>
-        </div>
-      ) : null}
-
-      {/* Full screen, zoom and fit. */}
-      <div className="absolute bottom-3 right-3 flex flex-col gap-2 select-none">
-        {fullscreen ? (
-          <button
-            className={iconBtn}
-            onClick={() => void toggleFullscreen()}
-            aria-label={isFullscreen ? "Exit full screen" : "Full screen"}
-            title={isFullscreen ? "Exit full screen (Esc)" : "Full screen"}
-          >
-            {isFullscreen ? <Shrink className="size-4" /> : <Expand className="size-4" />}
-          </button>
-        ) : null}
-        <button className={iconBtn} onClick={() => zoomBy(1.2)} aria-label="Zoom in" title="Zoom in">
+      </div>
+      <div className="absolute bottom-3 right-3 flex flex-col gap-0.5 p-1 rounded-lg bg-surface/90 backdrop-blur border border-border shadow-2xs select-none">
+        <button className={iconBtn} onClick={() => zoomBy(1.25)} aria-label="Zoom in">
           <Plus className="size-4" />
         </button>
-        <button className={iconBtn} onClick={() => zoomBy(1 / 1.2)} aria-label="Zoom out" title="Zoom out">
+        <button className={iconBtn} onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
           <Minus className="size-4" />
         </button>
+        <span className="h-px mx-1.5 bg-border" />
         <button
           className={iconBtn}
-          onClick={() => cyRef.current?.animate({ fit: { eles: cyRef.current.elements(), padding: 36 }, duration: 300 })}
+          onClick={() => {
+            userMovedRef.current = false;
+            fitRef.current(true);
+          }}
           aria-label="Fit to screen"
-          title="Fit everything in view"
         >
-          <LocateFixed className="size-4" />
+          <Scan className="size-4" />
         </button>
       </div>
-      {isFullscreen ? (
-        <span className="absolute bottom-3 left-3 type-caption px-2 py-1 rounded-lg bg-surface/85 border border-border select-none">Esc to exit full screen</span>
-      ) : null}
     </div>
   );
 }

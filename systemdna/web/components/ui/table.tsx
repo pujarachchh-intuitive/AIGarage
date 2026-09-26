@@ -23,7 +23,7 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("bg-zinc-50/80 [&_tr]:border-b [&_tr]:border-border", className)}
+      className={cn("bg-surface-secondary/60 [&_tr]:border-b [&_tr]:border-border", className)}
       {...props}
     />
   )
@@ -44,7 +44,7 @@ function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
     <tfoot
       data-slot="table-footer"
       className={cn(
-        "border-t border-border bg-zinc-50/40 font-medium [&>tr]:last:border-b-0",
+        "border-t border-border bg-surface-secondary/40 font-medium [&>tr]:last:border-b-0",
         className,
       )}
       {...props}
@@ -57,7 +57,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b border-border transition-colors duration-150 ease-out hover:bg-zinc-50/50 data-[state=selected]:bg-muted",
+        "border-b border-border transition-colors duration-150 ease-out hover:bg-surface-hover/60 data-[state=selected]:bg-muted",
         className,
       )}
       {...props}
@@ -70,7 +70,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-11 px-6 text-left align-middle type-label whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        "h-10 px-6 text-left align-middle font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-text-tertiary whitespace-nowrap [&:has([role=checkbox])]:pr-0",
         className,
       )}
       {...props}
@@ -83,7 +83,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "px-6 py-3.5 align-middle type-body whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        "px-6 py-3.5 align-middle type-body tabular-nums whitespace-nowrap [&:has([role=checkbox])]:pr-0",
         className,
       )}
       {...props}

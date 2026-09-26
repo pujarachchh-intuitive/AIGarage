@@ -9,6 +9,15 @@ import { cn } from "@/lib/cn";
 import { realRunTarget } from "@/lib/real-run";
 import { useApp } from "@/lib/store";
 import type { BobReview, BobStatus, Change, GithubStatus, Graph } from "@/lib/types";
+import { StepTrack, type StepState } from "@/components/changes/run-panels";
+
+// The PR stream's progress steps (lib/server/change-agent.ts and github-agent.ts).
+const PR_STAGES = [
+  { key: "clone", label: "Clone" },
+  { key: "apply", label: "Apply diff" },
+  { key: "push", label: "Push branch" },
+  { key: "pr", label: "Draft PR" },
+];
 
 /** The Bob Inspector's review as a PR description section. */
 function reviewMarkdown(review: BobReview | undefined) {
@@ -32,7 +41,7 @@ function ReviewView({ review }: { review: BobReview }) {
   }
   const approved = review.verdict === "approved";
   return (
-    <div className={cn("flex flex-col gap-2 px-4 py-3 rounded-xl border", approved ? "border-border" : "border-amber-200/50 bg-amber-50")}>
+    <div className={cn("flex flex-col gap-2 px-4 py-3 rounded-xl border", approved ? "border-border" : "border-warning/25 bg-warning-soft")}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-body font-semibold text-text-primary">IBM Bob Inspector</span>
         <Badge variant={approved ? "success" : "warning"}>{approved ? "Approved" : "Changes requested"}</Badge>
@@ -62,15 +71,15 @@ function DiffView({ diff }: { diff: string }) {
     <div className="flex flex-col gap-2">
       {files.map((f, i) => (
         <details key={f.name} open={i < 2} className="border border-border rounded-lg overflow-hidden">
-          <summary className="cursor-pointer px-3 py-2 bg-zinc-50/80 text-body font-semibold text-text-primary">{f.name}</summary>
+          <summary className="cursor-pointer px-3 py-2 bg-surface-secondary text-body font-semibold text-text-primary">{f.name}</summary>
           <pre className="text-caption leading-5 overflow-x-auto scroll-thin p-3 font-mono">
             {f.text.split("\n").map((line, j) => (
               <div
                 key={j}
                 className={cn(
                   "whitespace-pre",
-                  line.startsWith("+") && !line.startsWith("+++") && "bg-emerald-50 text-emerald-700",
-                  line.startsWith("-") && !line.startsWith("---") && "bg-red-50 text-red-700",
+                  line.startsWith("+") && !line.startsWith("+++") && "bg-success-soft text-success",
+                  line.startsWith("-") && !line.startsWith("---") && "bg-error-soft text-error",
                   line.startsWith("@@") && "text-text-tertiary",
                 )}
               >
@@ -94,7 +103,7 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
   const [status, setStatus] = useState<GithubStatus | null>(null);
   const [bob, setBob] = useState<BobStatus | null>(null);
   const [busy, setBusy] = useState(false);
-  const [steps, setSteps] = useState<string[]>([]);
+  const [steps, setSteps] = useState<{ step: string; detail: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -120,6 +129,22 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
   const pr = change.pullRequest;
   const repoLabel = target?.url.replace("https://github.com/", "");
 
+  // From run to pull request, at a glance.
+  const readiness: { label: string; state: StepState; hint?: string }[] = [
+    { label: "Real run", state: !run ? "waiting" : run.status === "running" ? "active" : run.status === "done" ? "done" : "failed", hint: run?.error },
+    {
+      label: "Diff ready",
+      state: run?.patchId ? "done" : !run || run.status === "running" ? "waiting" : run.status === "failed" ? "failed" : "skipped",
+      hint: run?.patchId ? `${run.files.length} files` : undefined,
+    },
+    {
+      label: "GitHub access",
+      state: !status ? "waiting" : canPush ? "done" : status.error ? "failed" : "waiting",
+      hint: status?.error ?? (needsInstall ? "Install the GitHub App on this repo" : !canPush && status ? "Not connected on the server" : undefined),
+    },
+    { label: "Draft PR", state: pr ? "done" : busy ? "active" : error ? "failed" : "waiting", hint: pr ? `#${pr.number}` : undefined },
+  ];
+
   const openPr = async () => {
     if (!run?.patchId) return;
     setBusy(true);
@@ -132,7 +157,7 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
         body: `${reportMarkdown()}${reviewMarkdown(run.review)}\n\n---\nOpened by SystemDNA. Edits were made by ${run.strategy === "compiler" ? "the TypeScript compiler's rename" : "IBM Bob Fixer agents, one per file, each limited to its own file"} and type-checked${run.remainingErrors?.length ? ` (${run.remainingErrors.length} new type errors remain; see the report)` : " with no new type errors"}.`,
       },
       (e) => {
-        if (e.type === "progress") setSteps((s) => [...s, e.detail]);
+        if (e.type === "progress") setSteps((s) => [...s, { step: e.step, detail: e.detail }]);
         if (e.type === "error") setError(e.message);
         if (e.type === "done" && !e.dryRun) setPullRequest(change.id, e.pr);
       },
@@ -175,7 +200,7 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
         </button>
       </div>
       {needsInstall && status?.app ? (
-        <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-border bg-zinc-50/80">
+        <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-border bg-surface-secondary">
           <span className="text-body text-text-secondary">
             The <span className="font-semibold text-text-primary">{status.app.name}</span> app is not installed on this repo yet. Install it, pick this repo, then come back here.
           </span>
@@ -193,10 +218,10 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
         <p className="type-caption text-error">{status.error}</p>
       ) : null}
       {confirming ? (
-        <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
+        <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-xl border border-warning/25 bg-warning-soft">
           <div className="flex flex-col gap-1">
-            <span className="text-body font-semibold text-amber-700">Push a new branch and open a draft PR on {repoLabel}?</span>
-            <span className="type-caption text-amber-700">
+            <span className="text-body font-semibold text-warning">Push a new branch and open a draft PR on {repoLabel}?</span>
+            <span className="type-caption text-warning">
               {run.files.length} files change, exactly as shown below. Nothing is merged; the default branch is not touched.
             </span>
           </div>
@@ -214,10 +239,10 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
       ) : null}
       {run.review ? <ReviewView review={run.review} /> : null}
       {run.remainingErrors?.length ? (
-        <div className="flex flex-col gap-1 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
-          <span className="text-body font-semibold text-amber-700">New type errors left after the run</span>
+        <div className="flex flex-col gap-1 px-4 py-3 rounded-xl border border-warning/25 bg-warning-soft">
+          <span className="text-body font-semibold text-warning">New type errors left after the run</span>
           {run.remainingErrors.slice(0, 8).map((e, i) => (
-            <span key={i} className="type-caption text-amber-700">
+            <span key={i} className="type-caption text-warning">
               {e.file}:{e.line} {e.message}
             </span>
           ))}
@@ -234,7 +259,8 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
       actions={
         <div className="flex items-center gap-2">
           {bob ? (
-            <Badge variant={bob.ready ? "success" : "neutral"} title={bob.reason}>
+            <Badge variant={bob.ready ? "success" : "neutral"} title={bob.reason ?? (bob.version ? `Bob Shell ${bob.version}` : undefined)}>
+              <span className={cn("size-1.5 rounded-full", bob.ready ? "bg-success" : "bg-icon-secondary")} />
               {bob.ready ? "IBM Bob ready" : "IBM Bob off"}
             </Badge>
           ) : null}
@@ -256,19 +282,34 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
       }
     >
       <div className="flex flex-col gap-4">
+        {target ? <StepTrack steps={readiness} /> : null}
         {body}
-        {steps.length > 0 ? (
-          <ol className="flex flex-col gap-1">
-            {steps.map((s, i) => (
-              <li key={i} className="flex items-center gap-2 text-body text-text-secondary">
-                {busy && i === steps.length - 1 ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5 text-success" />}
-                {s}
-              </li>
-            ))}
-          </ol>
+        {steps.length > 0 || (busy && !pr) ? (
+          <div className="flex flex-col gap-3 px-4 py-3.5 rounded-xl border border-border">
+            <span className="font-mono text-[10.5px] leading-4 font-medium uppercase tracking-[0.06em] text-text-tertiary">Opening the draft pull request</span>
+            <StepTrack
+              steps={PR_STAGES.map((s, i): { label: string; state: StepState } => {
+                const reached = Math.max(-1, ...steps.map((x) => PR_STAGES.findIndex((p) => p.key === x.step)));
+                const finished = Boolean(pr) && !busy;
+                if (finished || i < reached) return { label: s.label, state: "done" };
+                if (i === reached || (reached < 0 && i === 0)) return { label: s.label, state: error ? "failed" : busy ? "active" : "done" };
+                return { label: s.label, state: "waiting" };
+              })}
+            />
+            {steps.length > 0 ? (
+              <ol className="flex flex-col gap-1">
+                {steps.map((s, i) => (
+                  <li key={i} className="flex items-center gap-2 font-mono text-[11px] leading-4 text-text-secondary">
+                    {busy && i === steps.length - 1 ? <Loader2 className="size-3 animate-spin text-brand-text" /> : error && i === steps.length - 1 ? <X className="size-3 text-error" /> : <Check className="size-3 text-success" />}
+                    {s.detail}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+          </div>
         ) : null}
         {error ? (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50 text-body font-semibold text-red-700">
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-error/25 bg-error-soft text-body font-semibold text-error">
             <AlertTriangle className="size-4" />
             {error}
           </div>

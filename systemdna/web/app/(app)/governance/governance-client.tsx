@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronDown, ClipboardList, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react";
+import { StatusDot, bobState, useConnections } from "@/components/layout/sidebar";
 import { KpiTile } from "@/components/ui/kpi-tile";
 import { Card, PageHeader, PageShell } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -37,6 +38,8 @@ const EVENT_LABEL: Partial<Record<RunEventType, string>> = {
 
 export function GovernanceClient() {
   const changes = useRepoChanges();
+  const { bob } = useConnections();
+  const bs = bobState(bob);
   const [filter, setFilter] = useState<RunEventType | "all">("all");
 
   const log = useMemo(
@@ -59,7 +62,16 @@ export function GovernanceClient() {
         <KpiTile label="Changes governed" value={changes.length} icon={ShieldCheck} tone="success" />
       </div>
 
-      <Card title="City laws" subtitle="The rules every Bob agent works under.">
+      <Card
+        title="City laws"
+        subtitle="The rules every Bob agent works under."
+        actions={
+          <span className="inline-flex items-center gap-1.5 h-6 px-2 rounded-md border border-border bg-surface-secondary" title={bob?.reason ?? bs.label}>
+            <StatusDot tone={bs.tone} />
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-secondary">IBM Bob · {bs.tone === "ok" ? bs.label : bs.short}</span>
+          </span>
+        }
+      >
         <div className="border border-border rounded-xl overflow-hidden">
           <Table>
             <TableHeader>
@@ -104,7 +116,7 @@ export function GovernanceClient() {
               </option>
             ))}
           </select>
-          <ChevronDown className="size-4 text-zinc-400 absolute right-3 top-3 pointer-events-none" />
+          <ChevronDown className="size-4 text-icon-secondary absolute right-3 top-3 pointer-events-none" />
         </div>
       </div>
 

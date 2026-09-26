@@ -3,13 +3,13 @@ import { cn } from "@/lib/cn";
 
 export type KpiTone = "neutral" | "success" | "warning" | "inactive" | "error";
 
-// Icon well gradients from DESIGN.md section 8.
-const TONE_GRADIENT: Record<KpiTone, string> = {
-  neutral: "linear-gradient(to top, #18181B, #71717A)",
-  success: "linear-gradient(to top, #059669, #34D399)",
-  warning: "linear-gradient(to top, #D97706, #FBBF24)",
-  inactive: "linear-gradient(to top, #71717A, #A1A1AA)",
-  error: "linear-gradient(to top, #B91C1C, #F87171)",
+// Tone is carried by a single small status dot, never by a filled icon well.
+const TONE_DOT: Record<KpiTone, string | null> = {
+  neutral: null,
+  inactive: null,
+  success: "bg-success",
+  warning: "bg-warning",
+  error: "bg-error",
 };
 
 interface KpiTileProps {
@@ -18,45 +18,53 @@ interface KpiTileProps {
   icon: ComponentType<{ className?: string }>;
   tone?: KpiTone;
   delta?: { text: string; tone: "success" | "warning" | "error" | "neutral" };
+  /** Marks the one key metric on a screen with the brand accent. */
+  accent?: boolean;
   className?: string;
 }
 
-export function KpiTile({ label, value, icon: Icon, tone = "neutral", delta, className }: KpiTileProps) {
+export function KpiTile({ label, value, icon: Icon, tone = "neutral", delta, accent, className }: KpiTileProps) {
+  const dot = TONE_DOT[tone];
   return (
     <div
       className={cn(
-        "border border-border rounded-xl p-5 bg-surface min-h-[140px] flex flex-col justify-between hover:shadow-sm transition-shadow duration-150",
+        "relative overflow-hidden border border-border rounded-xl p-4 bg-surface min-h-[128px] flex flex-col justify-between transition-colors duration-150 hover:border-border-strong",
         className,
       )}
     >
-      <div
-        className="size-12 rounded-lg flex items-center justify-center text-white select-none"
-        style={{
-          background: TONE_GRADIENT[tone],
-          outline: "1px solid rgba(39,39,42,0.5)",
-          boxShadow: "0 1px 2px rgba(24,24,27,0.15)",
-        }}
-      >
-        <Icon className="size-6" />
+      {accent ? <span aria-hidden className="absolute left-0 top-0 h-[2px] w-12 bg-brand" /> : null}
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[11px] leading-4 font-medium uppercase tracking-[0.08em] text-text-tertiary truncate">
+          {label}
+        </span>
+        <span
+          className={cn(
+            "size-7 shrink-0 rounded-md border flex items-center justify-center select-none",
+            accent ? "border-brand/60 bg-brand-soft text-brand-text" : "border-border text-icon-secondary",
+          )}
+        >
+          <Icon className="size-3.5" />
+        </span>
       </div>
-      <div className="flex flex-col gap-1 mt-4">
-        <span className="type-metric">{value}</span>
-        <div className="flex items-center justify-between gap-2">
-          <span className="type-caption">{label}</span>
-          {delta ? (
-            <span
-              className={cn(
-                "text-body font-semibold",
-                delta.tone === "success" && "text-success",
-                delta.tone === "warning" && "text-warning",
-                delta.tone === "error" && "text-error",
-                delta.tone === "neutral" && "text-text-tertiary",
-              )}
-            >
-              {delta.text}
-            </span>
-          ) : null}
-        </div>
+      <div className="flex items-end justify-between gap-2 mt-6">
+        <span className="text-[32px] leading-9 font-semibold tracking-[-0.03em] tabular-nums text-text-primary">
+          {value}
+        </span>
+        {delta ? (
+          <span
+            className={cn(
+              "font-mono text-[11px] leading-4 font-medium tabular-nums mb-1.5",
+              delta.tone === "success" && "text-success",
+              delta.tone === "warning" && "text-warning",
+              delta.tone === "error" && "text-error",
+              delta.tone === "neutral" && "text-text-tertiary",
+            )}
+          >
+            {delta.text}
+          </span>
+        ) : dot ? (
+          <span className={cn("size-1.5 rounded-full mb-3", dot)} />
+        ) : null}
       </div>
     </div>
   );

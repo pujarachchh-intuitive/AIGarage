@@ -2,7 +2,7 @@
 
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
-// Same toast styling as HRMS: neutral borders for every type.
+// Hairline toasts; state colour only on the icon.
 export function Toaster(props: ToasterProps) {
   return (
     <Sonner
@@ -16,15 +16,15 @@ export function Toaster(props: ToasterProps) {
         duration: 3200,
         classNames: {
           toast:
-            "group !rounded-xl !border !border-border !bg-surface/95 !text-text-primary !shadow-lg !backdrop-blur-md !px-4 !py-3",
+            "group !rounded-xl !border !border-border !bg-surface/95 !text-text-primary !shadow-[0_12px_32px_-12px_rgb(0_0_0/0.25)] !backdrop-blur-md !px-4 !py-3",
           title: "!text-sm !font-semibold !leading-tight",
-          description: "!text-xs !font-medium !text-zinc-500",
-          closeButton: "!border-border !bg-surface !text-zinc-400 hover:!text-zinc-700",
-          success: "!border-border",
+          description: "!text-xs !font-medium !text-text-tertiary",
+          closeButton: "!border-border !bg-surface !text-text-tertiary hover:!text-text-primary",
+          success: "!border-border [&_[data-icon]]:!text-success",
           error: "!border-border",
           warning: "!border-border",
           info: "!border-border",
-          icon: "!text-zinc-500",
+          icon: "!text-text-tertiary",
         },
       }}
       {...props}

@@ -11,6 +11,7 @@ const STATUS_MAP: Record<string, BadgeTone> = {
   High: "success",
   Allowed: "success",
   Enforced: "success",
+  Set: "success",
 
   Running: "warning",
   Editing: "warning",

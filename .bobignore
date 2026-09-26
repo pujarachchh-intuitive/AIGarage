@@ -89,3 +89,8 @@ id_dsa
 # ============================================
 # DO NOT REMOVE ABOVE PATTERNS
 # ============================================
+# SystemDNA project additions (keep Bob's context small)
+node_modules/
+dist/
+**/package-lock.json
+.next/

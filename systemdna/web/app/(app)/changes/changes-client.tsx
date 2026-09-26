@@ -2,12 +2,15 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ChevronDown, GitBranch, Loader, Search, ShieldAlert } from "lucide-react";
+import { CheckCircle2, ChevronDown, ExternalLink, GitBranch, GitPullRequest, Loader, Search, ShieldAlert } from "lucide-react";
+import { RiskBadge } from "@/components/changes/impact-report";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KpiTile } from "@/components/ui/kpi-tile";
 import { PageHeader, PageShell, PrimaryLink } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/cn";
 import { deriveRun, formatDuration, type RunStatus } from "@/lib/run-state";
 import { useApp, useRepoChanges } from "@/lib/store";
 
@@ -58,7 +61,7 @@ export function ChangesClient() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="relative lg:col-span-2">
-          <Search className="size-4 text-zinc-400 absolute left-3 top-3" />
+          <Search className="size-4 text-icon-secondary absolute left-3 top-3" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -79,7 +82,7 @@ export function ChangesClient() {
               </option>
             ))}
           </select>
-          <ChevronDown className="size-4 text-zinc-400 absolute right-3 top-3 pointer-events-none" />
+          <ChevronDown className="size-4 text-icon-secondary absolute right-3 top-3 pointer-events-none" />
         </div>
       </div>
 
@@ -99,15 +102,17 @@ export function ChangesClient() {
                 <TableHead>Change</TableHead>
                 <TableHead>Affected</TableHead>
                 <TableHead>Files</TableHead>
+                <TableHead>Risk</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Mode</TableHead>
+                <TableHead>Pull request</TableHead>
                 <TableHead>Duration</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center type-caption">
+                  <TableCell colSpan={9} className="py-12 text-center type-caption">
                     No changes found
                   </TableCell>
                 </TableRow>
@@ -124,9 +129,50 @@ export function ChangesClient() {
                   <TableCell className="text-text-secondary">{change.report.items.filter((i) => i.severity !== "safe").length}</TableCell>
                   <TableCell className="text-text-secondary">{change.report.fixUnits.length}</TableCell>
                   <TableCell>
+                    {change.report.risk ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-12 h-1 rounded-full bg-surface-secondary overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full",
+                              change.report.risk.level === "critical" ? "bg-error" : change.report.risk.level === "high" ? "bg-warning" : change.report.risk.level === "medium" ? "bg-info" : "bg-success",
+                            )}
+                            style={{ width: `${change.report.risk.score}%` }}
+                          />
+                        </div>
+                        <RiskBadge score={change.report.risk.score} level={change.report.risk.level} />
+                      </div>
+                    ) : (
+                      <span className="text-text-tertiary">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <StatusBadge status={STATUS_LABEL[view.status]} />
                   </TableCell>
-                  <TableCell className="text-text-secondary">{change.mode === "demo" ? "Simulated" : "Live"}</TableCell>
+                  <TableCell className="text-text-secondary">{change.run ? (change.run.strategy === "compiler" ? "Real · compiler" : "Real · IBM Bob") : change.mode === "demo" ? "Simulated" : "Live"}</TableCell>
+                  <TableCell>
+                    {change.pullRequest ? (
+                      <a
+                        href={change.pullRequest.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold text-text-primary hover:text-brand-text transition-colors"
+                        title={`${change.pullRequest.branch} → ${change.pullRequest.base}`}
+                      >
+                        <GitPullRequest className="size-3.5 text-icon-secondary" />#{change.pullRequest.number}
+                        <ExternalLink className="size-3 text-icon-secondary" />
+                      </a>
+                    ) : change.run?.status === "running" ? (
+                      <Badge variant="warning">Running</Badge>
+                    ) : change.run?.status === "failed" ? (
+                      <Badge variant="destructive">Run failed</Badge>
+                    ) : change.run?.patchId ? (
+                      <Badge variant="info">Diff ready</Badge>
+                    ) : (
+                      <span className="text-text-tertiary">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-text-secondary tabular-nums">{view.startedAt ? formatDuration(view.elapsedMs) : "—"}</TableCell>
                 </TableRow>
               ))}

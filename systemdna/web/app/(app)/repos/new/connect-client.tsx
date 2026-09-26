@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, FileArchive, GitBranch, Link2, Loader2, Map as MapIcon, Upload, X } from "lucide-react";
+import { Check, ExternalLink, FileArchive, GitBranch, Link2, Loader2, Map as MapIcon, Upload, X } from "lucide-react";
+import { StatusDot, bobState, useConnections } from "@/components/layout/sidebar";
 import { Card, PageHeader, PageShell, SecondaryLink, inputClass, primaryButton, secondaryButton } from "@/components/ui/page";
-import { connectRepo, fetchBobStatus } from "@/lib/api";
+import { connectRepo, fetchBobStatus, fetchGithubStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/lib/store";
-import type { BobStatus, ConnectedRepo, IngestEvent } from "@/lib/types";
+import type { BobStatus, ConnectedRepo, GithubStatus, IngestEvent } from "@/lib/types";
 
 // The steps the ingestion service reports, in order. Scanner steps map onto them.
 const STEPS = [
@@ -62,6 +63,26 @@ export function ConnectRepoClient() {
       setUseBob(s.ready);
     });
   }, []);
+
+  // GitHub App mode: tell the user whether the app is installed on the repo they typed.
+  const { github } = useConnections();
+  const [ghRepo, setGhRepo] = useState<{ url: string; status: GithubStatus } | null>(null);
+  const typedGithub = mode === "git" && /^https?:\/\/(www\.)?github\.com\/[^/\s]+\/[^/\s]+/i.test(url.trim()) ? url.trim() : "";
+  const appMode = github?.mode === "app" && !github.error;
+  useEffect(() => {
+    if (!appMode || !typedGithub) return;
+    let live = true;
+    const t = setTimeout(() => {
+      void fetchGithubStatus(typedGithub).then((status) => {
+        if (live) setGhRepo({ url: typedGithub, status });
+      });
+    }, 500);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [appMode, typedGithub]);
+  const ghCheck = appMode && typedGithub ? (ghRepo?.url === typedGithub ? ghRepo.status : null) : undefined;
 
   // The Bob step shows only when Bob enrichment is on.
   const steps = STEPS.filter((s) => s.id !== "bob" || useBob);
@@ -162,11 +183,31 @@ export function ConnectRepoClient() {
                     disabled={phase === "running"}
                   />
                   <span className="type-caption">Public repos on GitHub, GitLab or Bitbucket.</span>
+                  {ghCheck !== undefined ? (
+                    <span className="flex items-center gap-2 mt-0.5">
+                      <StatusDot tone={ghCheck === null ? "pending" : ghCheck.error ? "error" : ghCheck.installed ? "ok" : "warn"} />
+                      <span className="type-caption flex-1 min-w-0 truncate">
+                        {ghCheck === null
+                          ? "Checking the GitHub App on this repo…"
+                          : ghCheck.error
+                            ? ghCheck.error
+                            : ghCheck.installed
+                              ? `${ghCheck.app?.name ?? "The GitHub App"} is installed here. The agent can open pull requests.`
+                              : "The GitHub App is not installed here. Scanning works; pull requests need the app."}
+                      </span>
+                      {ghCheck && !ghCheck.error && !ghCheck.installed && ghCheck.app ? (
+                        <a href={ghCheck.app.installUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 type-caption font-semibold text-text-primary hover:underline shrink-0">
+                          Install
+                          <ExternalLink className="size-3" />
+                        </a>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </label>
                 <label className="flex flex-col gap-1.5">
                   <span className="type-label">Branch (optional)</span>
                   <div className="relative">
-                    <GitBranch className="size-4 text-zinc-400 absolute left-3 top-3" />
+                    <GitBranch className="size-4 text-icon-secondary absolute left-3 top-3" />
                     <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Default branch" className={cn(inputClass, "pl-9")} disabled={phase === "running"} />
                   </div>
                 </label>
@@ -186,7 +227,7 @@ export function ConnectRepoClient() {
                 onClick={() => fileInput.current?.click()}
                 className={cn(
                   "cursor-pointer flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-xl border border-dashed text-center transition-colors",
-                  dragging ? "border-border-strong bg-surface-hover" : "border-border bg-zinc-50/50 hover:bg-surface-hover",
+                  dragging ? "border-border-strong bg-surface-hover" : "border-border bg-surface-secondary hover:bg-surface-hover",
                 )}
               >
                 <Upload className="size-5 text-icon-secondary" />
@@ -215,13 +256,20 @@ export function ConnectRepoClient() {
             <label className={cn("flex items-start gap-2.5", bobStatus?.ready ? "cursor-pointer" : "opacity-60")}>
               <input
                 type="checkbox"
-                className="mt-0.5 size-4 accent-zinc-900"
+                className="mt-0.5 size-4 accent-brand"
                 checked={useBob}
                 disabled={!bobStatus?.ready || phase === "running"}
                 onChange={(e) => setUseBob(e.target.checked)}
               />
               <span className="flex flex-col gap-0.5">
-                <span className="type-label">Enrich with IBM Bob</span>
+                <span className="flex items-center gap-2">
+                  <span className="type-label">Enrich with IBM Bob</span>
+                  <StatusDot tone={bobState(bobStatus).tone} />
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary">
+                    {bobState(bobStatus).short}
+                    {bobStatus?.version ? ` · v${bobStatus.version.replace(/^v/, "")}` : ""}
+                  </span>
+                </span>
                 <span className="type-caption">
                   {bobStatus === null
                     ? "Checking IBM Bob…"
@@ -263,9 +311,9 @@ export function ConnectRepoClient() {
                     <span
                       className={cn(
                         "size-6 rounded-full flex items-center justify-center border text-caption font-semibold shrink-0",
-                        state === "done" && "bg-zinc-900 border-transparent text-white",
+                        state === "done" && "bg-brand border-transparent text-brand-ink",
                         state === "active" && "border-border-strong text-text-primary",
-                        state === "failed" && "bg-red-50 border-red-200/50 text-red-700",
+                        state === "failed" && "bg-error-soft border-error/25 text-error",
                         state === "todo" && "border-border text-text-tertiary",
                       )}
                     >
@@ -283,7 +331,7 @@ export function ConnectRepoClient() {
           </ol>
 
           {error ? (
-            <div className="mt-2 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50 text-body text-red-700">{error}</div>
+            <div className="mt-2 px-4 py-3 rounded-xl border border-error/25 bg-error-soft text-body text-error">{error}</div>
           ) : null}
 
           {repo ? (

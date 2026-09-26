@@ -63,7 +63,7 @@ function AnalysisSteps({ graph, field }: { graph: Graph; field: string }) {
               {state === "done" ? (
                 <Check className="size-4 text-success animate-in zoom-in duration-200" />
               ) : state === "active" ? (
-                <Loader2 className="size-4 text-info animate-spin" />
+                <Loader2 className="size-4 text-brand-text animate-spin" />
               ) : (
                 <span className="size-1.5 rounded-full bg-border-strong" />
               )}
@@ -217,7 +217,7 @@ export function NewChangeClient() {
                     </optgroup>
                   ))}
                 </select>
-                <ChevronDown className="size-4 text-zinc-400 absolute right-3 top-3 pointer-events-none" />
+                <ChevronDown className="size-4 text-icon-secondary absolute right-3 top-3 pointer-events-none" />
               </div>
               {node ? <span className="type-caption">{node.line ? `${node.file}:${node.line}` : node.file}</span> : null}
             </label>
@@ -325,7 +325,7 @@ export function NewChangeClient() {
               className={cn("h-[460px] transition-shadow duration-500", scanning && "ai-glow")}
             />
           ) : (
-            <div className="h-[460px] rounded-xl bg-zinc-50 animate-pulse" />
+            <div className="h-[460px] rounded-xl bg-surface-secondary animate-pulse" />
           )}
           <CityLegend />
         </div>
@@ -334,7 +334,7 @@ export function NewChangeClient() {
       {result && graph ? (
         <div key={rippleKey} className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-500">
           <ImpactKpis report={result.report} />
-          <RiskCard report={result.report} />
+          <RiskCard report={result.report} graph={graph} />
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8 flex flex-col gap-3">
               <h2 className="type-heading">Affected components</h2>

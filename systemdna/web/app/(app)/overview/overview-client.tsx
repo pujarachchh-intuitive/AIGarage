@@ -4,7 +4,9 @@ import { useMemo, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Boxes, GitBranch, Map as MapIcon, Network, ShieldCheck, Sparkles } from "lucide-react";
+import { StatusDot, bobState, githubState, useConnections } from "@/components/layout/sidebar";
 import { KpiTile } from "@/components/ui/kpi-tile";
+import { LocalTime } from "@/components/ui/local-time";
 import { Card, PageHeader, PageShell, PrimaryLink, SecondaryLink } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { deriveRun, type RunStatus } from "@/lib/run-state";
@@ -26,7 +28,7 @@ function useMounted() {
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: { value?: number; name?: string }[]; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface border border-border rounded-md shadow-md px-3 py-1.5 text-caption font-semibold text-text-primary">
+    <div className="bg-surface border border-border rounded-md shadow-[0_8px_24px_-12px_rgb(0_0_0/0.3)] px-2.5 py-1.5 font-mono text-[11px] font-medium tabular-nums text-text-primary">
       {label ?? payload[0].name}: {payload[0].value}
     </div>
   );
@@ -36,6 +38,12 @@ export function OverviewClient() {
   const graph = useApp((s) => s.graph);
   const changes = useRepoChanges();
   const mounted = useMounted();
+  const repos = useApp((s) => s.repos);
+  const repoId = useApp((s) => s.repoId);
+  const { github, bob } = useConnections();
+  const connected = repos.find((r) => r.id === repoId);
+  const gh = githubState(github);
+  const bs = bobState(bob);
 
   const stats = useMemo(() => {
     if (!graph) return null;
@@ -82,10 +90,34 @@ export function OverviewClient() {
         }
       />
 
+      <Link
+        href="/settings"
+        className="grid grid-cols-1 sm:grid-cols-3 border border-border rounded-xl divide-y sm:divide-y-0 sm:divide-x divide-border hover:border-border-strong transition-colors"
+      >
+        {[
+          { k: "GitHub", tone: gh.tone, v: gh.label },
+          { k: "IBM Bob", tone: bs.tone, v: bs.label },
+        ].map((c) => (
+          <div key={c.k} className="flex items-center gap-3 px-4 py-2.5 min-w-0">
+            <StatusDot tone={c.tone} />
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary shrink-0">{c.k}</span>
+            <span className="text-body text-text-secondary truncate">{c.v}</span>
+          </div>
+        ))}
+        <div className="flex items-center gap-3 px-4 py-2.5 min-w-0">
+          <StatusDot tone={graph ? "ok" : "pending"} />
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary shrink-0">Scanned</span>
+          <span className="text-body text-text-secondary truncate tabular-nums">
+            {graph ? <LocalTime iso={connected?.scannedAt ?? graph.scannedAt} /> : "…"}
+            {connected ? ` · ${connected.stats.files.toLocaleString()} files` : ""}
+          </span>
+        </div>
+      </Link>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <KpiTile label="Components" value={graph?.nodes.length ?? "—"} icon={Boxes} delta={{ text: `${graph?.layers.length ?? 0} layers`, tone: "neutral" }} />
         <KpiTile label="Dependencies" value={graph?.edges.length ?? "—"} icon={Network} />
-        <KpiTile label="Found by Bob" value={stats?.bob ?? "—"} icon={Sparkles} tone="inactive" />
+        <KpiTile label="Found by Bob" value={stats?.bob ?? "—"} icon={Sparkles} tone="inactive" accent />
         <KpiTile label="Personal data" value={stats?.pii ?? "—"} icon={ShieldCheck} tone="warning" delta={{ text: `${stats?.untested ?? 0} untested`, tone: "warning" }} />
         <KpiTile label="Changes shipped" value={runs.filter((r) => r.view.status === "completed").length} icon={GitBranch} tone="success" />
       </div>
@@ -95,21 +127,19 @@ export function OverviewClient() {
           {mounted && stats ? (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={stats.byLayer} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#E4E4E7" />
-                    <stop offset="100%" stopColor="#18181B" />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--divider)" />
-                <XAxis dataKey="name" interval={0} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--text-secondary)", fontWeight: 600 }} />
-                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--text-disabled)" }} />
-                <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)", radius: 6 }} />
-                <Bar dataKey="count" fill="url(#barFill)" radius={[12, 12, 0, 0]} maxBarSize={48} />
+                                <CartesianGrid vertical={false} stroke="var(--divider)" />
+                <XAxis dataKey="name" interval={0} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--text-tertiary)", fontWeight: 500 }} />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--text-disabled)", fontFamily: "var(--font-geist-mono)" }} />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--brand-soft)", radius: 4 }} />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                  {stats.byLayer.map((l) => (
+                    <Cell key={l.name} fill={l.count === Math.max(...stats.byLayer.map((x) => x.count)) ? "var(--brand)" : "var(--chart-3)"} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-[240px] bg-zinc-50 rounded-xl animate-pulse" />
+            <div className="h-[240px] bg-surface-secondary rounded-lg animate-pulse" />
           )}
         </Card>
 
@@ -118,20 +148,20 @@ export function OverviewClient() {
             <div className="flex flex-col items-center">
               <ResponsiveContainer width="100%" height={180}>
                 <PieChart>
-                  <Pie data={[{ name: "Parser", value: stats.parser }, { name: "Found by Bob", value: stats.bob }]} dataKey="value" innerRadius={50} outerRadius={80} stroke="none" paddingAngle={2}>
-                    <Cell fill="var(--pie-1)" />
-                    <Cell fill="var(--pie-5)" />
+                  <Pie data={[{ name: "Parser", value: stats.parser }, { name: "Found by Bob", value: stats.bob }]} dataKey="value" innerRadius={58} outerRadius={80} stroke="var(--surface)" strokeWidth={2} paddingAngle={0}>
+                    <Cell fill="var(--chart-3)" />
+                    <Cell fill="var(--brand)" />
                   </Pie>
                   <Tooltip content={<ChartTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="flex items-center gap-4">
-                <span className="inline-flex items-center gap-1.5 type-caption"><span className="size-2.5 rounded-full" style={{ background: "var(--pie-1)" }} /> Parser ({stats.parser})</span>
-                <span className="inline-flex items-center gap-1.5 type-caption"><span className="size-2.5 rounded-full" style={{ background: "var(--pie-5)" }} /> Found by Bob ({stats.bob})</span>
+                <span className="inline-flex items-center gap-1.5 type-caption"><span className="size-2 rounded-[2px]" style={{ background: "var(--chart-3)" }} /> Parser ({stats.parser})</span>
+                <span className="inline-flex items-center gap-1.5 type-caption"><span className="size-2 rounded-[2px]" style={{ background: "var(--brand)" }} /> Found by Bob ({stats.bob})</span>
               </div>
             </div>
           ) : (
-            <div className="h-[200px] bg-zinc-50 rounded-xl animate-pulse" />
+            <div className="h-[200px] bg-surface-secondary rounded-lg animate-pulse" />
           )}
         </Card>
       </div>
@@ -141,7 +171,7 @@ export function OverviewClient() {
           <div className="flex flex-col divide-y divide-border">
             {runs.length === 0 ? <p className="type-caption py-6 text-center">No changes yet. Start one from New change.</p> : null}
             {runs.slice(0, 5).map(({ change, view }) => (
-              <Link key={change.id} href={`/changes/${change.id}`} className="flex items-center justify-between gap-3 py-3 hover:bg-zinc-50/50 -mx-2 px-2 rounded-lg transition-colors">
+              <Link key={change.id} href={`/changes/${change.id}`} className="flex items-center justify-between gap-3 py-3 hover:bg-surface-hover -mx-2 px-2 rounded-lg transition-colors">
                 <div className="flex flex-col min-w-0">
                   <span className="text-body font-semibold text-text-primary truncate">{change.title}</span>
                   <span className="type-caption">

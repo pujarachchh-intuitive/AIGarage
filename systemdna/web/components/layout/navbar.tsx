@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Command, Search } from "lucide-react";
+import { StatusDot, bobState, githubState, useConnections } from "@/components/layout/sidebar";
 import { DEMO_REPOS } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { layerLabel } from "@/lib/layers";
@@ -14,6 +16,11 @@ export default function Navbar() {
   const repoId = useApp((s) => s.repoId);
   const setRepo = useApp((s) => s.setRepo);
   const repos = useApp((s) => s.repos);
+  const { github, bob } = useConnections();
+  const conns = [
+    { name: "GitHub", state: githubState(github) },
+    { name: "Bob", state: bobState(bob) },
+  ];
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -62,17 +69,17 @@ export default function Navbar() {
       <div className="relative" ref={boxRef}>
         <button
           onClick={() => setOpen(true)}
-          className="cursor-pointer flex items-center gap-2 w-[280px] h-10 px-3 border border-border rounded-lg bg-surface text-body text-text-tertiary shadow-2xs hover:border-border-strong transition-colors duration-150"
+          className="cursor-pointer flex items-center gap-2 w-[280px] h-9 px-3 border border-border rounded-lg bg-surface text-body text-text-tertiary hover:border-border-strong hover:text-text-secondary transition-colors duration-150"
         >
           <Search className="size-4 text-icon-secondary" />
           <span className="flex-1 text-left">Find a component</span>
-          <span className="inline-flex items-center gap-0.5 px-1.5 h-5 rounded-md bg-surface-secondary border border-border text-[10px] font-semibold text-text-tertiary">
+          <span className="inline-flex items-center gap-0.5 px-1.5 h-5 rounded border border-border font-mono text-[10px] font-medium text-text-tertiary">
             <Command className="size-3" />K
           </span>
         </button>
 
         {open ? (
-          <div className="absolute left-0 top-12 w-[420px] bg-surface border border-border rounded-2xl shadow-lg p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="absolute left-0 top-12 w-[420px] bg-surface border border-border rounded-xl shadow-[0_24px_48px_-24px_rgb(0_0_0/0.35)] p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
             <div className="relative">
               <Search className="size-4 text-icon-secondary absolute left-3 top-3" />
               <input
@@ -102,14 +109,14 @@ export default function Navbar() {
                     onClick={() => go(n.id)}
                     className={cn(
                       "cursor-pointer flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left transition-colors",
-                      i === cursor ? "bg-surface-hover" : "hover:bg-surface-hover",
+                      i === cursor ? "bg-surface-hover shadow-[inset_2px_0_0_var(--brand)]" : "hover:bg-surface-hover",
                     )}
                   >
                     <div className="flex flex-col min-w-0">
                       <span className="text-body font-semibold text-text-primary truncate">{n.name}</span>
                       <span className="type-caption truncate">{n.file}</span>
                     </div>
-                    <span className="type-caption shrink-0">{layerLabel(graph, n.layer)}</span>
+                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary shrink-0">{layerLabel(graph, n.layer)}</span>
                   </button>
                 ))
               )}
@@ -119,8 +126,21 @@ export default function Navbar() {
       </div>
 
       <div className="flex items-center gap-3">
-        <label className="relative h-10 pl-3 pr-8 flex flex-col justify-center border border-border rounded-lg bg-surface shadow-2xs leading-tight hover:border-border-strong transition-colors cursor-pointer">
-          <span className="text-caption text-text-tertiary">Repository</span>
+        <Link
+          href="/settings"
+          className="hidden md:flex items-center gap-3 h-9 px-3 border border-border rounded-lg bg-surface hover:border-border-strong transition-colors"
+          title={conns.map((c) => `${c.name}: ${c.state.label}`).join("\n")}
+          aria-label={`Connections. ${conns.map((c) => `${c.name}: ${c.state.label}`).join(". ")}`}
+        >
+          {conns.map((c) => (
+            <span key={c.name} className="inline-flex items-center gap-1.5">
+              <StatusDot tone={c.state.tone} />
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary">{c.name}</span>
+            </span>
+          ))}
+        </Link>
+        <label className="relative h-9 pl-3 pr-8 flex items-center gap-2 border border-border rounded-lg bg-surface leading-tight hover:border-border-strong transition-colors cursor-pointer">
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-tertiary">Repo</span>
           <select
             value={repoId}
             onChange={(e) => {
@@ -131,7 +151,7 @@ export default function Navbar() {
               void setRepo(e.target.value);
               router.push("/overview");
             }}
-            className="appearance-none bg-transparent text-body font-semibold text-text-primary focus:outline-none cursor-pointer"
+            className="appearance-none bg-transparent text-body font-medium text-text-primary focus:outline-none cursor-pointer"
             aria-label="Choose repository"
           >
             {repos.length > 0 ? (
@@ -152,7 +172,7 @@ export default function Navbar() {
             </optgroup>
             <option value="__connect">+ Connect a repository…</option>
           </select>
-          <ChevronDown className="size-4 text-zinc-400 absolute right-2.5 top-3 pointer-events-none" />
+          <ChevronDown className="size-4 text-icon-secondary absolute right-2.5 top-2.5 pointer-events-none" />
         </label>
       </div>
     </header>

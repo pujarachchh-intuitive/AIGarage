@@ -25,7 +25,7 @@ function EdgeRow({ edge, otherId, graph, onSelect }: { edge: GraphEdge; otherId:
         </span>
       </div>
       {edge.source === "bob" ? (
-        <Badge variant="info" className="shrink-0">Found by Bob</Badge>
+        <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-1.5 py-px rounded-sm bg-brand-soft text-brand-text">Found by Bob</span>
       ) : null}
     </button>
   );

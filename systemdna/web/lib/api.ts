@@ -9,14 +9,42 @@ import type { AgentEvent, BobStatus, ChangeRequest, ChangeRunRequest, ChangeStre
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
 export const DATA_MODE: DataMode = API_URL ? "live" : "demo";
-const DEMO_TOKEN = process.env.NEXT_PUBLIC_DEMO_TOKEN || "";
+
+// The demo write token is typed in on the Settings page and kept in sessionStorage only.
+// It must never come from NEXT_PUBLIC_* env vars: those are baked into the public bundle.
+const TOKEN_KEY = "systemdna.demoToken";
+const tokenListeners = new Set<() => void>();
+
+export function subscribeDemoToken(onChange: () => void): () => void {
+  tokenListeners.add(onChange);
+  return () => tokenListeners.delete(onChange);
+}
+
+export function getDemoToken(): string {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setDemoToken(token: string) {
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Storage blocked (private mode): the token simply is not kept.
+  }
+  tokenListeners.forEach((l) => l());
+}
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getDemoToken();
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(DEMO_TOKEN ? { Authorization: `Bearer ${DEMO_TOKEN}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
