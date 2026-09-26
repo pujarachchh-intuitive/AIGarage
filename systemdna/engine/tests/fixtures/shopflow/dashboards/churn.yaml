@@ -1,0 +1,7 @@
+dashboard: churn
+owner: Marketing
+source: churn_scores
+metrics:
+  - name: churn_score
+    column: churn_score
+groupBy: cust_id

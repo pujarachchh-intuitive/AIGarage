@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
-import { Maximize2, Minus, Plus } from "lucide-react";
+import { Minus, Plus, Scan } from "lucide-react";
+import { registerSnapshot } from "@/lib/city-export";
 import { indexGraph } from "@/lib/impact";
 import type { AgentState, BuildingState } from "@/lib/run-state";
 import { useIsDark } from "@/lib/theme";
@@ -340,7 +341,12 @@ export function CityMap({
     const ro = new ResizeObserver(() => cy.resize());
     ro.observe(containerRef.current);
 
+    const unregister = registerSnapshot(() =>
+      cy.png({ output: "base64uri", full: true, scale: 2, bg: readTokens().background }),
+    );
+
     return () => {
+      unregister();
       cancelAnimationFrame(frame);
       ro.disconnect();
       cy.destroy();
@@ -500,6 +506,8 @@ export function CityMap({
       <div className="absolute inset-0">
         <div ref={containerRef} className="w-full h-full" />
       </div>
+
+      {/* Zoom and fit. Full screen lives in the Agent City toolbar. */}
       <div className="absolute bottom-3 right-3 flex flex-col gap-2 select-none">
         <button className={iconBtn} onClick={() => zoomBy(1.2)} aria-label="Zoom in">
           <Plus className="size-4" />
@@ -507,8 +515,8 @@ export function CityMap({
         <button className={iconBtn} onClick={() => zoomBy(1 / 1.2)} aria-label="Zoom out">
           <Minus className="size-4" />
         </button>
-        <button className={iconBtn} onClick={() => cyRef.current?.fit(undefined, 36)} aria-label="Fit to screen">
-          <Maximize2 className="size-4" />
+        <button className={iconBtn} onClick={() => cyRef.current?.fit(undefined, 36)} aria-label="Fit to screen" title="Fit everything in view">
+          <Scan className="size-4" />
         </button>
       </div>
     </div>

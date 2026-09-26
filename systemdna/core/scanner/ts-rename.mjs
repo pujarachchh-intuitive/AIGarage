@@ -1,11 +1,16 @@
 // SystemDNA rename agent (code side).
 //
-// Renames a field of a TypeScript interface or class everywhere it is used,
-// using the TypeScript language service's own rename (the same engine as
-// "Rename symbol" in VS Code). It then checks that no new type errors appear.
+// Renames a TypeScript symbol everywhere it is used, using the TypeScript
+// language service's own rename (the same engine as "Rename symbol" in VS
+// Code). It then checks that no new type errors appear.
+//
+//   --field Type.field              a field of an interface or class
+//   --symbol name --file path [--line n]
+//                                   a function, class, interface, type alias,
+//                                   enum or variable declared in that file
 //
 // Usage:
-//   node ts-rename.mjs <repo-dir> --field Type.field --to newName [--apply] [--max-files 2500]
+//   node ts-rename.mjs <repo-dir> (--field Type.field | --symbol name --file path [--line n]) --to newName [--apply] [--max-files 2500]
 //
 // Output: one JSON object on stdout:
 //   { ok, field, to, locations, files: [{ file, count }], docs: [{ file, count }],
@@ -20,6 +25,9 @@ import ts from "typescript";
 const [, , repoArg, ...rest] = process.argv;
 const arg = (name) => (rest.indexOf(name) >= 0 ? rest[rest.indexOf(name) + 1] : undefined);
 const fieldArg = arg("--field");
+const symbolArg = arg("--symbol");
+const symbolFile = arg("--file");
+const symbolLine = Number(arg("--line") ?? 0);
 const to = arg("--to");
 const apply = rest.includes("--apply");
 const maxFiles = Number(arg("--max-files") ?? 2500);
@@ -29,10 +37,12 @@ function fail(message) {
   process.exit(2);
 }
 
-if (!repoArg || !fieldArg || !to) fail("Usage: node ts-rename.mjs <repo-dir> --field Type.field --to newName [--apply]");
+if (!repoArg || !(fieldArg || (symbolArg && symbolFile)) || !to) fail("Usage: node ts-rename.mjs <repo-dir> (--field Type.field | --symbol name --file path) --to newName [--apply]");
 if (!/^[A-Za-z_$][\w$]*$/.test(to)) fail(`"${to}" is not a valid identifier`);
-const [typeName, fieldName] = fieldArg.split(".");
-if (!typeName || !fieldName) fail("--field must look like Type.field");
+const symbolMode = !fieldArg;
+const [typeName, fieldName] = symbolMode ? ["", symbolArg] : fieldArg.split(".");
+if (!fieldName || (!symbolMode && !typeName)) fail("--field must look like Type.field");
+if (symbolMode && !/^[A-Za-z_$][\w$]*$/.test(fieldName)) fail(`"${fieldName}" is not a valid identifier`);
 
 const root = path.resolve(repoArg);
 const rel = (f) => path.relative(root, f).split(path.sep).join("/");
@@ -86,21 +96,37 @@ const host = {
 };
 const ls = ts.createLanguageService(host, ts.createDocumentRegistry());
 
-// 1. Find the field's declaration.
+// 1. Find the declaration.
 let decl = null;
-for (const f of files) {
-  const sf = ls.getProgram().getSourceFile(f);
-  if (!sf) continue;
+if (symbolMode) {
+  // A top-level declaration with this name in the given file; the one nearest --line wins.
+  const f = files.find((x) => rel(x) === symbolFile);
+  const sf = f && ls.getProgram().getSourceFile(f);
+  if (!sf) fail(`${symbolFile} is not a TypeScript or JavaScript file in the project`);
+  const found = [];
   for (const stmt of sf.statements) {
-    const isType = (ts.isInterfaceDeclaration(stmt) || ts.isClassDeclaration(stmt)) && stmt.name?.text === typeName;
-    if (!isType) continue;
-    for (const m of stmt.members) {
-      if (m.name && ts.isIdentifier(m.name) && m.name.text === fieldName) decl = { file: f, pos: m.name.getStart(sf) };
-    }
+    const names = [];
+    if ((ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt) || ts.isInterfaceDeclaration(stmt) || ts.isTypeAliasDeclaration(stmt) || ts.isEnumDeclaration(stmt)) && stmt.name) names.push(stmt.name);
+    if (ts.isVariableStatement(stmt)) for (const d of stmt.declarationList.declarations) if (ts.isIdentifier(d.name)) names.push(d.name);
+    for (const n of names) if (n.text === fieldName) found.push({ file: f, pos: n.getStart(sf), line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1 });
   }
-  if (decl) break;
+  decl = found.sort((a, b) => Math.abs(a.line - symbolLine) - Math.abs(b.line - symbolLine))[0] ?? null;
+  if (!decl) fail(`Could not find ${fieldName} declared in ${symbolFile}`);
+} else {
+  for (const f of files) {
+    const sf = ls.getProgram().getSourceFile(f);
+    if (!sf) continue;
+    for (const stmt of sf.statements) {
+      const isType = (ts.isInterfaceDeclaration(stmt) || ts.isClassDeclaration(stmt)) && stmt.name?.text === typeName;
+      if (!isType) continue;
+      for (const m of stmt.members) {
+        if (m.name && ts.isIdentifier(m.name) && m.name.text === fieldName) decl = { file: f, pos: m.name.getStart(sf) };
+      }
+    }
+    if (decl) break;
+  }
+  if (!decl) fail(`Could not find ${typeName}.${fieldName} in the repo`);
 }
-if (!decl) fail(`Could not find ${typeName}.${fieldName} in the repo`);
 
 // Type errors per file, as "code:message" keys, so we can spot new ones after the edit.
 function errorKeys(fileList) {
@@ -127,6 +153,7 @@ if (locations.length === 0) fail("The compiler found nothing to rename");
 const program = ls.getProgram();
 const checker = program.getTypeChecker();
 const typeFields = (() => {
+  if (symbolMode) return new Set();
   const sf = program.getSourceFile(decl.file);
   for (const stmt of sf.statements) {
     if ((ts.isInterfaceDeclaration(stmt) || ts.isClassDeclaration(stmt)) && stmt.name?.text === typeName) {
@@ -136,7 +163,7 @@ const typeFields = (() => {
   return new Set();
 })();
 let stringKeys = 0;
-for (const f of files) {
+for (const f of symbolMode ? [] : files) {
   const sf = program.getSourceFile(f);
   if (!sf || !contents.get(f).includes(fieldName)) continue;
   const visit = (node) => {
@@ -179,14 +206,15 @@ for (const [key, list] of after) {
   if (list.length > had) newErrors.push(...list.slice(had));
 }
 
-// 5. Docs: a markdown line that names both the type and the field (same rule as the scanner).
+// 5. Docs: for a field, a markdown line that names both the type and the field
+// (same rule as the scanner); for any other symbol, code spans like `name` or `name()`.
 const docEdits = [];
-const wordRe = new RegExp(`\\b${fieldName}\\b`, "g");
+const wordRe = symbolMode ? new RegExp(`(?<=\`)${fieldName}(?=(\\(\\))?\`)`, "g") : new RegExp(`\\b${fieldName}\\b`, "g");
 for (const f of allFiles.filter((x) => /\.mdx?$/.test(x) && !/(^|\/)(AGENTS|CLAUDE)\.md$/.test(rel(x)))) {
   const lines = fs.readFileSync(f, "utf8").split(/(\r?\n)/);
   let count = 0;
   for (let i = 0; i < lines.length; i += 2) {
-    if (lines[i].includes(typeName) && wordRe.test(lines[i])) {
+    if ((symbolMode || lines[i].includes(typeName)) && wordRe.test(lines[i])) {
       wordRe.lastIndex = 0;
       count += (lines[i].match(wordRe) ?? []).length;
       lines[i] = lines[i].replace(wordRe, to);
@@ -206,7 +234,7 @@ if (apply && ok) {
 process.stdout.write(
   JSON.stringify({
     ok,
-    field: `${typeName}.${fieldName}`,
+    field: symbolMode ? fieldName : `${typeName}.${fieldName}`,
     to,
     locations: locations.length,
     stringKeys,

@@ -91,17 +91,21 @@ export const useApp = create<AppState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({ changes: s.changes, repoId: s.repoId }),
       skipHydration: true,
-      onRehydrateStorage: () => () => useApp.setState({ hydrated: true }),
+      onRehydrateStorage: () => () => {
+        // The ShopFlow sample was removed. Move anyone still on it to the default sample.
+        const { repoId } = useApp.getState();
+        useApp.setState({ hydrated: true, ...(repoId === "shopflow" ? { repoId: DEMO_REPOS[0].id, graph: null } : {}) });
+      },
     },
   ),
 );
 
-/** Changes that belong to the repo on screen. Older saved changes had no repo: they are ShopFlow's. */
+/** Changes that belong to the repo on screen. Older saved changes with no repo are hidden. */
 export function useRepoChanges(): Change[] {
   const changes = useApp((s) => s.changes);
   const repo = useApp((s) => s.graph?.repo);
   return useMemo(
-    () => (repo ? changes.filter((c) => (c.repo ?? "samples/shopflow") === repo) : []),
+    () => (repo ? changes.filter((c) => c.repo === repo) : []),
     [changes, repo],
   );
 }

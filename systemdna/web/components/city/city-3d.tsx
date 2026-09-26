@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
-import { Maximize2, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { Minus, Plus, RotateCcw, RotateCw, Scan } from "lucide-react";
+import { addLighting, buildBuilding, buildWorld, skyBottom, type TimeOfDay, type Weather, type World } from "@/components/city/city-realism";
+import { canvasToPng, registerSnapshot } from "@/lib/city-export";
 import { cn } from "@/lib/cn";
 import { FOOTPRINT, layoutCity, type CityData } from "@/lib/city";
 import { useIsDark } from "@/lib/theme";
@@ -19,6 +21,20 @@ interface City3DProps {
   /** Dim every folder except this one. */
   focusDir?: string | null;
   colorMode?: CityColorMode;
+  /** What building height shows. */
+  heightMode?: "lines" | "imports";
+  /** Which import arcs to draw. */
+  arcs?: "all" | "selected" | "none";
+  /** Which building labels to show when nothing is selected. */
+  labels?: "landmarks" | "all" | "none";
+  /** Slowly turn the city (handy for demos). */
+  autoRotate?: boolean;
+  /** Realistic: textured buildings, roads, trees, cars, shadows. Schematic: the clean zinc look. */
+  realistic?: boolean;
+  /** Light for the realistic look. */
+  time?: TimeOfDay;
+  /** Weather for the realistic look. */
+  weather?: Weather;
   className?: string;
 }
 
@@ -34,20 +50,51 @@ export function districtColor(index: number, mode: CityColorMode, dark: boolean)
 }
 
 const ELEVATION = Math.atan(1 / Math.SQRT2); // true isometric: about 35 degrees
+const CAMERA_DISTANCE = 400;
 
 interface Built {
   mesh: THREE.Mesh;
-  mat: THREE.MeshLambertMaterial;
-  edges: THREE.LineSegments;
+  /** Every material that fades when the building is dimmed. */
+  mats: THREE.Material[];
+  /** Schematic: the Lambert material that glows on hover and selection. */
+  glow?: THREE.MeshLambertMaterial;
+  /** Schematic: always-on edges. */
+  edges?: THREE.LineSegments;
+  /** Realistic: outline shown on hover and selection. */
+  outline?: THREE.LineSegments;
+  /** Realistic: everything that casts a shadow (off while dimmed). */
+  casters: THREE.Object3D[];
   cap?: THREE.Mesh;
   label: CSS2DObject;
   dir: string;
 }
 
-export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc", className }: City3DProps) {
+function fade(m: THREE.Material, dim: boolean, dimOpacity: number) {
+  // Switching transparency changes the shader, so three.js must recompile it.
+  if (m.transparent !== dim) m.needsUpdate = true;
+  m.transparent = dim;
+  m.opacity = dim ? dimOpacity : 1;
+  m.depthWrite = !dim;
+}
+
+export function City3D({
+  data,
+  selected,
+  onSelect,
+  focusDir,
+  colorMode = "zinc",
+  heightMode = "lines",
+  arcs: arcMode = "all",
+  labels: labelMode = "landmarks",
+  autoRotate = false,
+  realistic = true,
+  time = "day",
+  weather = "clear",
+  className,
+}: City3DProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
-  const layout = useMemo(() => layoutCity(data), [data]);
+  const layout = useMemo(() => layoutCity(data, heightMode), [data, heightMode]);
   const onSelectRef = useRef(onSelect);
   const api = useRef<{
     fit: () => void;
@@ -55,7 +102,14 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
     zoom: (f: number) => void;
     apply: () => void;
   } | null>(null);
-  const viewRef = useRef({ selected: selected ?? null, focusDir: focusDir ?? null, hovered: null as string | null });
+  const viewRef = useRef({
+    selected: selected ?? null,
+    focusDir: focusDir ?? null,
+    hovered: null as string | null,
+    arcMode,
+    labelMode,
+    autoRotate,
+  });
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -69,7 +123,8 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
     const width = () => Math.max(1, host.clientWidth);
     const height = () => Math.max(1, host.clientHeight);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // preserveDrawingBuffer lets "Download image" read the last frame.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width(), height());
     host.appendChild(renderer.domElement);
@@ -94,24 +149,33 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
     controls.minPolarAngle = 0.35;
     controls.maxPolarAngle = 1.3;
 
-    // Light: soft sky light plus one sun, so each side of a building has its own shade.
-    scene.add(new THREE.HemisphereLight(0xffffff, isDark ? 0x202024 : 0xd4d4d8, isDark ? 1.35 : 1.6));
-    const sun = new THREE.DirectionalLight(0xffffff, isDark ? 1.2 : 1.1);
-    sun.position.set(-40, 90, 60);
-    scene.add(sun);
-
-    // Ground grid.
-    const span = Math.max(layout.size.w, layout.size.d) * 3 + 60;
-    const grid = new THREE.GridHelper(span, Math.round(span / 8), t.border, t.border);
-    (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = isDark ? 0.55 : 0.7;
-    grid.position.y = -0.35;
-    scene.add(grid);
-
     const dirIndex = new Map(data.districts.map((d, i) => [d.dir, i]));
+    let world: World | null = null;
+    let disposeLighting: (() => void) | null = null;
 
-    // District plates and their labels.
+    if (realistic) {
+      // Streets, sidewalks, grass, trees, lamps, cars and people; then sun, sky, haze and shadows.
+      world = buildWorld(scene, layout, data, time, weather);
+      disposeLighting = addLighting(scene, renderer, world.radius, time, weather, CAMERA_DISTANCE);
+    } else {
+      // Light: soft sky light plus one sun, so each side of a building has its own shade.
+      scene.add(new THREE.HemisphereLight(0xffffff, isDark ? 0x202024 : 0xd4d4d8, isDark ? 1.35 : 1.6));
+      const sun = new THREE.DirectionalLight(0xffffff, isDark ? 1.2 : 1.1);
+      sun.position.set(-40, 90, 60);
+      scene.add(sun);
+
+      // Ground grid.
+      const span = Math.max(layout.size.w, layout.size.d) * 3 + 60;
+      const grid = new THREE.GridHelper(span, Math.round(span / 8), t.border, t.border);
+      (grid.material as THREE.Material).transparent = true;
+      (grid.material as THREE.Material).opacity = isDark ? 0.55 : 0.7;
+      grid.position.y = -0.35;
+      scene.add(grid);
+    }
+
+    // District plates (schematic only) and labels (both styles).
     for (const d of layout.districts) {
+      if (!realistic) {
       const color = new THREE.Color(districtColor(dirIndex.get(d.dir) ?? 0, colorMode, isDark));
       const plateColor = new THREE.Color(t.surface).lerp(color, colorMode === "folder" ? 0.28 : 0.12);
       const plate = new THREE.Mesh(
@@ -126,10 +190,13 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
       );
       outline.position.copy(plate.position);
       scene.add(outline);
+      }
 
       const count = data.districts.find((x) => x.dir === d.dir)?.files.length ?? 0;
       const el = document.createElement("div");
-      el.className = "flex flex-col items-center leading-tight select-none";
+      el.className = realistic
+        ? "flex flex-col items-center leading-tight select-none px-2 py-0.5 rounded-md bg-surface/85 border border-border shadow-2xs backdrop-blur-sm"
+        : "flex flex-col items-center leading-tight select-none";
       const name = document.createElement("span");
       name.className = "type-label";
       name.textContent = d.dir;
@@ -138,34 +205,50 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
       sub.textContent = `${count} ${count === 1 ? "file" : "files"}`;
       el.append(name, sub);
       const label = new CSS2DObject(el);
-      label.position.set(d.x + d.w / 2, 0, d.z + d.d + 2.6);
+      label.position.set(d.x + d.w / 2, 0, d.z + d.d + (realistic ? 1.4 : 2.6));
       scene.add(label);
     }
 
     // Buildings: one per file.
     const built = new Map<string, Built>();
     const pickable: THREE.Mesh[] = [];
+    const landmarks = new Map(data.files.map((f) => [f.path, f.landmark]));
     // Core modules get the inverse of the text colour so the cap stands out on zinc buildings.
-    const capColor = { entry: t.info, core: t.textInverse, hotspot: t.warning };
+    const capColor = { entry: t.info, core: realistic ? "#ffffff" : t.textInverse, hotspot: t.warning };
+    const tallestH = Math.max(0, ...[...layout.positions.values()].map((p) => p.h));
     for (const f of data.files) {
       const pos = layout.positions.get(f.path);
       if (!pos) continue;
       const color = districtColor(dirIndex.get(f.dir) ?? 0, colorMode, isDark);
-      const geo = new THREE.BoxGeometry(FOOTPRINT, pos.h, FOOTPRINT);
-      geo.translate(0, pos.h / 2, 0);
-      const mat = new THREE.MeshLambertMaterial({ color, emissive: new THREE.Color(0x000000) });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(pos.x, 0, pos.z);
-      mesh.userData.path = f.path;
-      scene.add(mesh);
-      pickable.push(mesh);
-
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(geo),
-        new THREE.LineBasicMaterial({ color: isDark ? "#000000" : "#FFFFFF", transparent: true, opacity: isDark ? 0.25 : 0.45 }),
-      );
-      edges.position.copy(mesh.position);
-      scene.add(edges);
+      let entry: Omit<Built, "label" | "dir" | "cap">;
+      if (realistic) {
+        const b = buildBuilding(f.path, pos, {
+          language: f.language,
+          tint: colorMode === "folder" ? color : undefined,
+          time,
+          tallest: pos.h === tallestH && pos.h > 8,
+          landmark: Boolean(f.landmark),
+        });
+        scene.add(b.mesh, b.outline, ...b.parts, ...b.extras);
+        pickable.push(...b.parts);
+        entry = { mesh: b.mesh, mats: b.mats, outline: b.outline, casters: b.casters };
+      } else {
+        const geo = new THREE.BoxGeometry(FOOTPRINT, pos.h, FOOTPRINT);
+        geo.translate(0, pos.h / 2, 0);
+        const mat = new THREE.MeshLambertMaterial({ color, emissive: new THREE.Color(0x000000) });
+        const box = new THREE.Mesh(geo, mat);
+        box.position.set(pos.x, 0, pos.z);
+        box.userData.path = f.path;
+        scene.add(box);
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(geo),
+          new THREE.LineBasicMaterial({ color: isDark ? "#000000" : "#FFFFFF", transparent: true, opacity: isDark ? 0.25 : 0.45 }),
+        );
+        edges.position.copy(box.position);
+        scene.add(edges);
+        entry = { mesh: box, mats: [mat], glow: mat, edges, casters: [] };
+      }
+      pickable.push(entry.mesh);
 
       let cap: THREE.Mesh | undefined;
       if (f.landmark) {
@@ -174,6 +257,7 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
           new THREE.MeshLambertMaterial({ color: capColor[f.landmark], emissive: new THREE.Color(capColor[f.landmark]), emissiveIntensity: 0.25 }),
         );
         cap.position.set(pos.x, pos.h + 0.22, pos.z);
+        cap.castShadow = realistic;
         scene.add(cap);
       }
 
@@ -188,7 +272,7 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
       label.position.set(pos.x, pos.h + (cap ? 0.6 : 0.2), pos.z);
       scene.add(label);
 
-      built.set(f.path, { mesh, mat, edges, cap, label, dir: f.dir });
+      built.set(f.path, { ...entry, cap, label, dir: f.dir });
     }
 
     // Import arcs.
@@ -227,7 +311,7 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
       const tall = (layout.size.w + layout.size.d) * 0.41 + maxH * 0.82 + 10;
       viewSize = Math.max(across / aspect, tall);
       controls.target.set(0, maxH * 0.3, 0);
-      const dist = 400;
+      const dist = CAMERA_DISTANCE;
       camera.position.set(
         dist * Math.cos(ELEVATION) * Math.sin(Math.PI / 4),
         dist * Math.sin(ELEVATION),
@@ -251,34 +335,38 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
 
     // Selection, hover and folder focus.
     const apply = () => {
-      const { selected: sel, focusDir: fd, hovered } = viewRef.current;
+      const { selected: sel, focusDir: fd, hovered, arcMode: am, labelMode: lm } = viewRef.current;
       const file = sel ? data.files.find((f) => f.path === sel) : undefined;
       const related = new Set<string>(file ? [file.path, ...file.imports, ...file.importedBy] : []);
       for (const [path, b] of built) {
-        const dim = (file && !related.has(path)) || (fd && b.dir !== fd);
-        // Switching transparency changes the shader, so three.js must recompile it.
-        if (b.mat.transparent !== Boolean(dim)) b.mat.needsUpdate = true;
-        b.mat.transparent = Boolean(dim);
-        b.mat.opacity = dim ? 0.16 : 1;
-        b.mat.depthWrite = !dim;
-        (b.edges.material as THREE.LineBasicMaterial).opacity = dim ? 0.04 : isDark ? 0.25 : 0.45;
-        if (b.cap) {
-          const cm = b.cap.material as THREE.MeshLambertMaterial;
-          if (cm.transparent !== Boolean(dim)) cm.needsUpdate = true;
-          cm.transparent = Boolean(dim);
-          cm.opacity = dim ? 0.2 : 1;
+        const dim = Boolean((file && !related.has(path)) || (fd && b.dir !== fd));
+        for (const m of b.mats) fade(m, dim, realistic ? 0.12 : 0.16);
+        for (const c of b.casters) c.castShadow = !dim;
+        if (b.edges) (b.edges.material as THREE.LineBasicMaterial).opacity = dim ? 0.04 : isDark ? 0.25 : 0.45;
+        if (b.cap) fade(b.cap.material as THREE.Material, dim, 0.2);
+        if (b.glow) {
+          b.glow.emissive.set(path === sel ? (isDark ? "#3F3F46" : "#52525B") : path === hovered ? "#27272A" : "#000000");
+          b.glow.emissiveIntensity = path === sel ? 0.9 : 0.5;
         }
-        b.mat.emissive.set(path === sel ? (isDark ? "#3F3F46" : "#52525B") : path === hovered ? (isDark ? "#27272A" : "#27272A") : "#000000");
-        b.mat.emissiveIntensity = path === sel ? 0.9 : 0.5;
-        const landmark = data.files.find((f) => f.path === path)?.landmark;
-        const show = path === sel || path === hovered || (!file && !fd && Boolean(landmark)) || (file && related.has(path) && path !== sel && related.size <= 8);
+        if (b.outline) {
+          b.outline.visible = path === sel || path === hovered;
+          (b.outline.material as THREE.LineBasicMaterial).color.set(path === sel ? "#ffffff" : "#d4d4d8");
+        }
+        const landmark = landmarks.get(path);
+        const idle = !file && !fd;
+        const show =
+          path === sel ||
+          path === hovered ||
+          (idle && lm === "all") ||
+          (idle && lm === "landmarks" && Boolean(landmark)) ||
+          (file && related.has(path) && path !== sel && related.size <= 8);
         // CSS2DRenderer owns element.style.display, so toggle the object instead.
         b.label.visible = Boolean(show);
       }
       for (const a of arcs) {
         const touches = file && (a.from === file.path || a.to === file.path);
         const inDir = !fd || built.get(a.from)?.dir === fd || built.get(a.to)?.dir === fd;
-        a.line.visible = file ? Boolean(touches) : inDir;
+        a.line.visible = am === "none" ? false : file ? Boolean(touches) : am === "selected" ? false : inDir;
         a.mat.color.set(touches ? t.textPrimary : t.textTertiary);
         a.mat.opacity = touches ? 0.95 : fd ? 0.35 : 0.18;
       }
@@ -330,6 +418,10 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
       if (e.key === "0") fit();
     };
     window.addEventListener("keydown", onKey);
+    const unregister = registerSnapshot(() => {
+      renderer.render(scene, camera);
+      return canvasToPng(renderer.domElement, realistic ? skyBottom(time, weather) : t.background);
+    });
 
     const ro = new ResizeObserver(() => {
       renderer.setSize(width(), height());
@@ -340,7 +432,14 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
 
     let frame = 0;
     const up = new THREE.Vector3(0, 1, 0);
+    const clock = new THREE.Clock();
     const tick = () => {
+      const dt = clock.getDelta();
+      world?.update(dt, clock.elapsedTime);
+      if (viewRef.current.autoRotate && !down) {
+        const offset = camera.position.clone().sub(controls.target).applyAxisAngle(up, 0.0025);
+        camera.position.copy(controls.target).add(offset);
+      }
       if (Math.abs(pendingTurn) > 0.0005) {
         const step = pendingTurn * 0.14;
         pendingTurn -= step;
@@ -355,6 +454,7 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
     tick();
 
     return () => {
+      unregister();
       cancelAnimationFrame(frame);
       ro.disconnect();
       window.removeEventListener("keydown", onKey);
@@ -362,6 +462,7 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("pointermove", onMove);
       controls.dispose();
+      disposeLighting?.();
       scene.traverse((o) => {
         const m = o as THREE.Mesh;
         m.geometry?.dispose();
@@ -374,14 +475,13 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
       labels.domElement.remove();
       api.current = null;
     };
-  }, [data, layout, isDark, colorMode]);
+  }, [data, layout, isDark, colorMode, realistic, time, weather]);
 
-  // Selection and focus changes do not rebuild the scene.
+  // Selection, focus and display modes do not rebuild the scene.
   useEffect(() => {
-    viewRef.current.selected = selected ?? null;
-    viewRef.current.focusDir = focusDir ?? null;
+    Object.assign(viewRef.current, { selected: selected ?? null, focusDir: focusDir ?? null, arcMode, labelMode, autoRotate });
     api.current?.apply();
-  }, [selected, focusDir]);
+  }, [selected, focusDir, arcMode, labelMode, autoRotate]);
 
   const iconBtn =
     "cursor-pointer flex items-center justify-center size-9 bg-surface border border-border rounded-lg text-icon-secondary hover:text-text-primary hover:bg-surface-hover hover:border-border-strong shadow-2xs active:scale-95 transition-all duration-150";
@@ -396,8 +496,8 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
         <button className={iconBtn} onClick={() => api.current?.zoom(0.8)} aria-label="Zoom out" title="Zoom out">
           <Minus className="size-4" />
         </button>
-        <button className={iconBtn} onClick={() => api.current?.fit()} aria-label="Fit to screen" title="Fit (0)">
-          <Maximize2 className="size-4" />
+        <button className={iconBtn} onClick={() => api.current?.fit()} aria-label="Fit to screen" title="Fit everything in view (0)">
+          <Scan className="size-4" />
         </button>
         <button className={iconBtn} onClick={() => api.current?.rotate(-45)} aria-label="Rotate left" title="Rotate left ([)">
           <RotateCcw className="size-4" />
@@ -406,7 +506,7 @@ export function City3D({ data, selected, onSelect, focusDir, colorMode = "zinc",
           <RotateCw className="size-4" />
         </button>
       </div>
-      <div className="absolute bottom-3 left-3 flex items-center gap-3 select-none">
+      <div className="absolute bottom-3 left-3 flex items-center gap-3 select-none px-2 py-1 rounded-lg bg-surface/85 border border-border backdrop-blur-sm">
         {[
           ["drag", "pan"],
           ["scroll", "zoom"],
