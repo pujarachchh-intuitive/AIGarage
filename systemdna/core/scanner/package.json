@@ -1,0 +1,13 @@
+{
+  "name": "systemdna-ts-scanner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Builds a SystemDNA graph.json from a TypeScript / Next.js repo using the TypeScript language service.",
+  "scripts": {
+    "scan": "node ts-scan.mjs"
+  },
+  "dependencies": {
+    "typescript": "^5.9.0"
+  }
+}
