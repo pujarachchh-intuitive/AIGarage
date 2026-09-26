@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --test scripts/test-impact.mjs",
+    "bench": "node scripts/bench-impact.mjs",
     "scan:sample": "node ../core/scanner/ts-scan.mjs ../samples/marketplace-dashboard lib/mock/marketplace-dashboard.graph.json"
   },
   "dependencies": {

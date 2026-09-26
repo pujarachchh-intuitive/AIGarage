@@ -86,8 +86,15 @@ function graphImpactMarkdown(
     `| Fix waves | ${result.waveCount} |`,
     `| Dangling references before fix | ${result.danglingRefs} |`,
     `| Computation time | ${result.computedMs} ms |`,
+    ...(result.risk ? [`| Risk | ${result.risk.score} / 100 (${result.risk.level}) |`] : []),
     "",
   ];
+
+  if (result.risk?.recommendations.length) {
+    lines.push("**Before merging:**");
+    for (const t of result.risk.recommendations.slice(0, 5)) lines.push(`- ${t}`);
+    lines.push("");
+  }
 
   if (result.business.length > 0) {
     lines.push("**Business processes affected:**");
