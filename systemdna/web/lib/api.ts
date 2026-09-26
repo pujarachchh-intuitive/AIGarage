@@ -6,7 +6,7 @@
 import { computeImpact } from "@/lib/impact";
 import marketplaceGraph from "@/lib/mock/marketplace-dashboard.graph.json";
 import { shopflowGraph } from "@/lib/mock/shopflow";
-import type { ChangeRequest, ConnectedRepo, DataMode, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
+import type { AgentEvent, ChangeRequest, ConnectedRepo, DataMode, Graph, ImpactReport, IngestEvent, RunEvent } from "@/lib/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
 export const DATA_MODE: DataMode = API_URL ? "live" : "demo";
@@ -30,6 +30,8 @@ export interface DemoRepo {
   label: string;
   description: string;
   graph: Graph;
+  /** Where the real code lives, so the GitHub agent can open PRs. */
+  gitUrl?: string;
   /** The change the New change form starts with. */
   defaultChange: { node: string; to: string };
 }
@@ -42,6 +44,7 @@ export const DEMO_REPOS: DemoRepo[] = [
     label: "marketplace-dashboard",
     description: "Next.js + TypeScript. Scanned with the TypeScript compiler.",
     graph: marketplaceGraph as Graph,
+    gitUrl: "https://github.com/krishil-agrawal-itp/marketplace-dashboard",
     defaultChange: { node: "field:Deployment.successRate", to: "deploySuccessRate" },
   },
   {
@@ -82,18 +85,18 @@ export async function listConnectedRepos(): Promise<ConnectedRepo[]> {
   return res.json() as Promise<ConnectedRepo[]>;
 }
 
-/** Reads a newline-delimited JSON progress stream. Resolves with the final event. */
-async function readIngestStream(res: Response, onEvent: (e: IngestEvent) => void): Promise<IngestEvent> {
+/** Reads a newline-delimited JSON stream. Resolves with the last event. */
+async function readNdjson<E extends { type: string }>(res: Response, onEvent: (e: E) => void): Promise<E> {
   if (!res.ok || !res.body) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    const e: IngestEvent = { type: "error", message: body?.error ?? `Request failed (${res.status})` };
+    const e = { type: "error", message: body?.error ?? `Request failed (${res.status})` } as unknown as E;
     onEvent(e);
     return e;
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let last: IngestEvent = { type: "error", message: "The connection closed early" };
+  let last = { type: "error", message: "The connection closed early" } as unknown as E;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -102,7 +105,7 @@ async function readIngestStream(res: Response, onEvent: (e: IngestEvent) => void
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (!line.trim()) continue;
-      last = JSON.parse(line) as IngestEvent;
+      last = JSON.parse(line) as E;
       onEvent(last);
     }
   }
@@ -121,12 +124,12 @@ export async function connectRepo(
   } else {
     res = await fetch("/api/repos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
   }
-  return readIngestStream(res, onEvent);
+  return readNdjson<IngestEvent>(res, onEvent);
 }
 
-export async function rescanRepo(id: string, onEvent: (e: IngestEvent) => void) {
+export async function rescanRepo(id: string, onEvent: (e: IngestEvent) => void): Promise<IngestEvent> {
   const res = await fetch(`/api/repos/${encodeURIComponent(id)}/rescan`, { method: "POST" });
-  return readIngestStream(res, onEvent);
+  return readNdjson<IngestEvent>(res, onEvent);
 }
 
 export async function removeRepo(id: string) {
@@ -187,4 +190,29 @@ export function subscribeEvents(
     clearTimeout(retry);
     ws?.close();
   };
+}
+
+// ---------------------------------------------------------------------------
+// GitHub agent (app/api/github).
+// ---------------------------------------------------------------------------
+
+export async function fetchGithubStatus(): Promise<{ configured: boolean; login?: string; error?: string }> {
+  const res = await fetch("/api/github/status", { cache: "no-store" });
+  return res.ok ? res.json() : { configured: false, error: `Status check failed (${res.status})` };
+}
+
+export interface AgentRequest {
+  url: string;
+  ref?: string;
+  field: string;
+  to: string;
+  changeId: string;
+  title: string;
+  body: string;
+  dryRun: boolean;
+}
+
+export async function runGithubAgent(input: AgentRequest, onEvent: (e: AgentEvent) => void): Promise<AgentEvent> {
+  const res = await fetch("/api/github/pull-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  return readNdjson<AgentEvent>(res, onEvent);
 }

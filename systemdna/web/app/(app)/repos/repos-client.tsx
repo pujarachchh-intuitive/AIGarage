@@ -6,6 +6,7 @@ import { FolderGit2, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LocalTime } from "@/components/ui/local-time";
 import { PageHeader, PageShell, PrimaryLink } from "@/components/ui/page";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DEMO_REPOS, removeRepo, rescanRepo } from "@/lib/api";
@@ -108,7 +109,7 @@ export function ReposClient() {
                 <TableCell className="text-right tabular-nums">{r.stats.lines.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.stats.nodes}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.stats.edges}</TableCell>
-                <TableCell className="type-caption">{new Date(r.scannedAt).toLocaleString()}</TableCell>
+                <TableCell className="type-caption"><LocalTime iso={r.scannedAt} /></TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-2">
                     {r.id === repoId ? <Badge variant="success">On screen</Badge> : null}
@@ -137,7 +138,7 @@ export function ReposClient() {
                 <TableCell className="text-right tabular-nums">{lines.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.graph.nodes.length}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.graph.edges.length}</TableCell>
-                <TableCell className="type-caption">{new Date(r.graph.scannedAt).toLocaleString()}</TableCell>
+                <TableCell className="type-caption"><LocalTime iso={r.graph.scannedAt} /></TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-2">{r.id === repoId ? <Badge variant="success">On screen</Badge> : null}</div>
                 </TableCell>

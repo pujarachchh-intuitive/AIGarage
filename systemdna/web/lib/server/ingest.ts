@@ -43,7 +43,7 @@ export function validateGitInput(url: string, ref?: string): string | null {
 }
 
 function scannerPath() {
-  return process.env.SYSTEMDNA_SCANNER ?? path.resolve(process.cwd(), "../core/scanner/ts-scan.mjs");
+  return process.env.SYSTEMDNA_SCANNER ?? path.resolve(/*turbopackIgnore: true*/ process.cwd(), "../core/scanner/ts-scan.mjs");
 }
 
 /** Runs a command without a shell. Rejects on non-zero exit or timeout. */
@@ -127,10 +127,10 @@ async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt"
 
   const scanner = scannerPath();
   if (!existsSync(scanner)) throw new Error(`Scanner not found at ${scanner}. Set SYSTEMDNA_SCANNER.`);
-  if (!existsSync(path.join(path.dirname(scanner), "node_modules", "typescript"))) {
+  if (!existsSync(path.join(/*turbopackIgnore: true*/ path.dirname(scanner), "node_modules", "typescript"))) {
     throw new Error("The scanner's packages are not installed. Run npm install in core/scanner.");
   }
-  const out = path.join(dir, "..", "graph.json");
+  const out = path.join(/*turbopackIgnore: true*/ dir, "..", "graph.json");
   let stats: RepoStats | null = null;
   await run(process.execPath, [scanner, dir, out, "--repo-name", meta.name, "--progress"], {
     timeoutMs: LIMITS.scanMs,
@@ -155,7 +155,7 @@ async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt"
 export async function withWorkspace<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   if (running >= LIMITS.concurrent) throw new Error("Two repositories are already being scanned. Try again in a minute.");
   running += 1;
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), "systemdna-"));
+  const base = await fs.mkdtemp(path.join(/*turbopackIgnore: true*/ os.tmpdir(), "systemdna-"));
   try {
     const dir = path.join(base, "repo");
     await fs.mkdir(dir);
