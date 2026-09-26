@@ -8,8 +8,12 @@ It uses the TypeScript language service, the same engine behind "Find all refere
 
 ```bash
 npm install
-node ts-scan.mjs <repo-dir> <out-file.json> [--repo-name name]
+node ts-scan.mjs <repo-dir> <out-file.json> [--repo-name name] [--progress] [--max-files 2500]
 ```
+
+- `--progress` prints one JSON line per step (the upload screen reads these).
+- `--max-files` caps how many code files are scanned (default 2,500).
+- Works with or without a `tsconfig.json`. It never runs code from the repo.
 
 Example, from this folder:
 
@@ -17,7 +21,15 @@ Example, from this folder:
 node ts-scan.mjs ../../samples/marketplace-dashboard ../../web/lib/mock/marketplace-dashboard.graph.json
 ```
 
-On `marketplace-dashboard` it reads 30 files in about 5 seconds and writes 201 nodes and 643 links.
+On `marketplace-dashboard` it reads 31 code files in about 4 seconds and writes 202 nodes and 643 links.
+
+## Rename agent
+
+```bash
+node ts-rename.mjs <repo-dir> --field Type.field --to newName [--apply]
+```
+
+Uses the compiler's rename, adds `keyof` string keys and docs that name the field, then checks every file that mentions the old name for **new** type errors. With `--apply` it writes the edits only if that check passes. It prints one JSON result: edits per file, docs, string keys, and any new errors. The GitHub agent in the web app runs it on a fresh clone before opening a pull request.
 
 ## What it finds
 
@@ -32,17 +44,20 @@ On `marketplace-dashboard` it reads 30 files in about 5 seconds and writes 201 n
 
 ## Layers it assigns
 
+Found from common folder names (a leading `src/` is ignored). Only layers the repo uses appear.
+
 | Layer | Files |
 | --- | --- |
-| `types` | `lib/types.ts` (needs approval) |
-| `data` | `data/**` |
-| `logic` | other `lib/**` |
-| `components` | `components/**` |
-| `pages` | `app/**/page.tsx`, `app/layout.tsx` |
+| `types` | `types.ts`, `types/`, `models/`, `entities/`, `schemas/` (needs approval) |
+| `data` | `data/`, `seed`, `fixtures`, `mocks` |
+| `logic` | `lib/`, `utils/`, `services/`, `hooks/`, and anything else |
+| `api` | `app/**/route.ts`, `pages/api/`, `api/`, `routes/`, `controllers/` |
+| `components` | `components/`, `ui/`, `views/`, other `.tsx` files |
+| `pages` | `app/**/page.tsx`, `layout.tsx`, `pages/**` |
 | `business` | from the README route table |
-| `quality` | markdown docs |
+| `quality` | tests (`*.test.*`, `tests/`) and markdown docs |
 
-The layer rules match the layout of `marketplace-dashboard`. Other repos may need different rules in `layerOf()`.
+Tested on `marketplace-dashboard` (Next.js), `sindresorhus/ky` and `pmndrs/zustand` (libraries with `src/`).
 
 ## Limits
 

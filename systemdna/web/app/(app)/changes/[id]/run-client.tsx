@@ -5,12 +5,13 @@ import { Bot, Clock, Coins, Download, FileSearch, Info, Layers3, RotateCcw, Shie
 import { toast } from "sonner";
 import { CityLegend } from "@/components/city/city-legend";
 import { CityMap, type CityAgent } from "@/components/city/city-map";
+import { GithubAgentPanel } from "@/components/changes/github-agent-panel";
 import { AgentsTable, GovernancePanel, GraphDiffCard, TraceTimeline } from "@/components/changes/run-panels";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KpiTile } from "@/components/ui/kpi-tile";
 import { PageHeader, PageShell, PrimaryLink, primaryButton, secondaryButton } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { approveChange, subscribeEvents } from "@/lib/api";
+import { approveChange, DEMO_REPOS, subscribeEvents } from "@/lib/api";
 import { buildReport, downloadText } from "@/lib/report";
 import { deriveRun, formatDuration, type BuildingState, type RunStatus } from "@/lib/run-state";
 import { approveSimulation, isSimulating, startSimulation, stopSimulation } from "@/lib/simulator";
@@ -30,7 +31,17 @@ export function RunClient({ id }: { id: string }) {
   const appendEvent = useApp((s) => s.appendEvent);
   const resetEvents = useApp((s) => s.resetEvents);
   const change = useChange(id);
+  const repos = useApp((s) => s.repos);
+  const setRepo = useApp((s) => s.setRepo);
   const [now, setNow] = useState(() => Date.now());
+
+  // A change belongs to one repo: show it against that repo's graph.
+  const wrongRepo = Boolean(change?.repo && graph && graph.repo !== change.repo);
+  useEffect(() => {
+    if (!change?.repo || !graph || graph.repo === change.repo) return;
+    const id = repos.find((r) => r.name === change.repo)?.id ?? DEMO_REPOS.find((r) => r.graph.repo === change.repo)?.id;
+    if (id) void setRepo(id);
+  }, [change?.repo, graph, repos, setRepo]);
 
   const completed = change?.events.some((e) => e.event === "change_completed") ?? false;
 
@@ -99,7 +110,7 @@ export function RunClient({ id }: { id: string }) {
     [view?.agents, assetsOf],
   );
 
-  if (!hydrated || !graph) {
+  if (!hydrated || !graph || wrongRepo) {
     return (
       <PageShell>
         <div className="h-[600px] rounded-xl bg-zinc-50 animate-pulse" />
@@ -172,6 +183,8 @@ export function RunClient({ id }: { id: string }) {
           </p>
         </div>
       ) : null}
+
+      <GithubAgentPanel change={change} graph={graph} reportMarkdown={() => buildReport(change, graph, view)} />
 
       {view.pendingApprovals.length > 0 ? (
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-amber-200/50 bg-amber-50">
