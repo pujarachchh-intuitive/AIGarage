@@ -120,12 +120,21 @@ export interface Graph {
   files?: RepoFile[];
 }
 
-export type ChangeKind = "rename" | "type_change" | "delete";
+/**
+ * rename       give a symbol, field, table or column a new name (`to` = new name)
+ * type_change  change the type of a field, column or constant (`to` = new type)
+ * signature    change a function's parameters or return type (`to` = new signature)
+ * delete       remove it; dependents must stop using it (`to` = "")
+ * custom       anything else, described in plain words (`description`)
+ */
+export type ChangeKind = "rename" | "type_change" | "signature" | "delete" | "custom";
 
 export interface ChangeRequest {
   node: string;
   change: ChangeKind;
   to: string;
+  /** Free text: the change itself for "custom", extra instructions otherwise. */
+  description?: string;
 }
 
 export type Severity = "breaking" | "needs_update" | "update" | "safe";
@@ -215,12 +224,52 @@ export interface PullRequestRef {
   base: string;
 }
 
+/** What the browser sends to run a change for real (app/api/changes/run). */
+export interface ChangeRunRequest {
+  url: string;
+  ref?: string;
+  change: Pick<Change, "id" | "title" | "request" | "report">;
+  /** The node the change starts from. */
+  origin: GraphNode;
+  /** Per fix-unit file: why it is affected (link evidence), for the agents' tasks. */
+  context: Record<string, string[]>;
+}
+
+export type RunStrategy = "compiler" | "bob";
+
+/** The outcome of a real run, kept with the change. */
+export interface ChangeRunResult {
+  status: "running" | "done" | "failed";
+  strategy?: RunStrategy;
+  /** Latest status line while running. */
+  step?: string;
+  /** Stored diff on the server, used to open the PR without re-running. */
+  patchId?: string;
+  files: string[];
+  diff: string;
+  diffTruncated: boolean;
+  review?: BobReview;
+  /** New type errors left after the run. */
+  remainingErrors?: { file: string; line: number; message: string }[];
+  error?: string;
+}
+
+/** One line of the real-run stream. */
+export type ChangeStreamLine =
+  | { type: "event"; event: RunEvent }
+  | { type: "status"; step: string; strategy?: RunStrategy }
+  | { type: "review"; review: BobReview }
+  | { type: "preview"; files: string[]; diff: string; diffTruncated: boolean; patchId?: string; remainingErrors: { file: string; line: number; message: string }[] }
+  | { type: "error"; message: string };
+
 export interface Change {
   id: string;
   /** Graph.repo this change belongs to. */
   repo?: string;
   /** A real pull request opened by the GitHub agent. */
   pullRequest?: PullRequestRef;
+  /** The real run (compiler or Bob agents), when one ran. */
+  run?: ChangeRunResult;
   title: string;
   request: ChangeRequest;
   report: ImpactReport;
@@ -240,6 +289,10 @@ export interface RepoStats {
   layers: number;
   truncated: boolean;
   ms: number;
+  /** Links added by the IBM Bob Cartographer. Set only when Bob enrichment was asked for. */
+  bobLinks?: number;
+  /** Nodes Bob flagged as personal data. */
+  bobPii?: number;
 }
 
 /** A repository a user connected (git URL or zip upload). */
@@ -259,6 +312,27 @@ export type IngestEvent =
   | { type: "done"; repo: ConnectedRepo }
   | { type: "error"; message: string };
 
+/** The IBM Bob Inspector's review of a rename diff. */
+export type BobReview =
+  | {
+      status: "done";
+      verdict: "approved" | "changes_requested";
+      summary: string;
+      issues: { file: string; line?: number; message: string }[];
+      bobcoins?: number;
+      durationMs?: number;
+    }
+  | { status: "skipped"; reason: string };
+
+/** Whether IBM Bob can run on the server. Never includes the key. */
+export interface BobStatus {
+  configured: boolean;
+  cli: boolean;
+  version?: string;
+  ready: boolean;
+  reason?: string;
+}
+
 /** One line of the GitHub agent stream. */
 /** What the server can do on GitHub (from /api/github/status). Never holds a secret. */
 export interface GithubStatus {
@@ -276,6 +350,7 @@ export interface GithubStatus {
 export type AgentEvent =
   | { type: "progress"; step: string; detail: string }
   | { type: "preview"; files: { file: string; count: number }[]; docs: { file: string; count: number }[]; locations: number; stringKeys: number; diff: string; diffTruncated: boolean }
+  | { type: "review"; review: BobReview }
   | { type: "done"; dryRun: true }
   | { type: "done"; dryRun: false; pr: PullRequestRef }
   | { type: "error"; message: string; newErrors?: { file: string; line: number; message: string }[] };

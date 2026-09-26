@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { DATA_MODE, DEMO_REPOS, fetchGraph, listConnectedRepos } from "@/lib/api";
-import type { Change, ConnectedRepo, Graph, PullRequestRef, RunEvent } from "@/lib/types";
+import type { Change, ChangeRunResult, ConnectedRepo, Graph, PullRequestRef, RunEvent } from "@/lib/types";
 
 interface AppState {
   graph: Graph | null;
@@ -22,6 +22,8 @@ interface AppState {
   appendEvent: (ev: RunEvent) => void;
   resetEvents: (changeId: string) => void;
   setPullRequest: (changeId: string, pr: PullRequestRef) => void;
+  /** Merge into a change's real-run result (undefined clears it). */
+  setRun: (changeId: string, run: Partial<ChangeRunResult> | undefined) => void;
   resetDemo: () => void;
   nextChangeId: () => string;
 }
@@ -67,6 +69,14 @@ export const useApp = create<AppState>()(
         })),
       setPullRequest: (changeId, pr) =>
         set((s) => ({ changes: s.changes.map((c) => (c.id === changeId ? { ...c, pullRequest: pr } : c)) })),
+      setRun: (changeId, run) =>
+        set((s) => ({
+          changes: s.changes.map((c) =>
+            c.id !== changeId
+              ? c
+              : { ...c, run: run === undefined ? undefined : { status: "running", files: [], diff: "", diffTruncated: false, ...c.run, ...run } },
+          ),
+        })),
       resetDemo: () => set({ changes: [] }),
       nextChangeId: () => {
         const max = get().changes.reduce((m, c) => {

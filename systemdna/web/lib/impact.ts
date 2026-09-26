@@ -26,6 +26,50 @@ const MAX_DEPTH = 40;
 // Edges that describe coverage of an asset, not data flow.
 const COVERAGE_EDGES = new Set<GraphEdge["type"]>(["TESTS", "DOCUMENTS"]);
 
+/** Nodes that hold one value (their users read or write it by name). */
+const VALUE_NODES = new Set<GraphNode["type"]>(["TSField", "Column", "Field"]);
+
+/**
+ * How badly a change reaches `e.to`, given how badly it reached `e.from`.
+ *
+ * rename       fields and columns follow the edge rules; for any other symbol
+ *              (function, type, constant, component) every direct reference breaks
+ * type_change  users of the value break; values passed on need a check
+ * custom       like type_change (the agents decide what really needs an edit)
+ * signature    callers break; nothing further
+ * delete       direct users break; a field or column that mirrors the deleted one
+ *              goes too, so its users break as well
+ */
+function severityFor(request: ChangeRequest, from: { severity: Severity; isOrigin: boolean; type: GraphNode["type"] }, e: GraphEdge): Severity {
+  const coverage = COVERAGE_EDGES.has(e.type);
+  const directUse = (): Severity => (e.type === "RETURNS" ? "safe" : coverage ? "update" : "breaking");
+  switch (request.change) {
+    case "rename":
+      if (from.isOrigin && !VALUE_NODES.has(from.type)) return directUse();
+      break;
+    case "type_change":
+    case "custom":
+      if (from.severity === "breaking") {
+        if (e.rule === "update_doc") return "update";
+        if (e.rule === "passthrough") return e.type === "RETURNS" ? "safe" : "needs_update";
+        return "breaking";
+      }
+      return from.severity === "needs_update" && coverage ? "update" : "safe";
+    case "signature":
+      if (from.isOrigin) return directUse();
+      return from.severity === "breaking" && coverage ? "update" : "safe";
+    case "delete":
+      if (from.isOrigin || (from.severity === "breaking" && VALUE_NODES.has(from.type) && e.type !== "RETURNS")) return directUse();
+      return from.severity === "breaking" && coverage ? "update" : "safe";
+  }
+  // Field and column renames: the edge rule decides.
+  if (from.severity === "breaking") return RULE_SEVERITY[e.rule];
+  // The asset still changes, so its tests and docs still need a look.
+  if (from.severity === "needs_update" && coverage) return "update";
+  // Behind an alias, a doc or a test: downstream is safe.
+  return "safe";
+}
+
 export function assetOf(node: GraphNode): string {
   return node.parent ?? node.id;
 }
@@ -71,9 +115,17 @@ export function computeImpact(graph: Graph, request: ChangeRequest): ImpactRepor
   const origin = byId.get(request.node);
   if (!origin) throw new Error(`Unknown node ${request.node}`);
 
+  // A table or type changed as a whole (not renamed) carries its columns' and
+  // fields' links: code that uses a column of a deleted table breaks too. A
+  // renamed table does too, since code names the model to reach its columns.
+  const children = new Map<string, GraphNode[]>();
+  for (const n of graph.nodes) if (n.parent) children.set(n.parent, [...(children.get(n.parent) ?? []), n]);
+  const wholeAsset = (origin.type === "Table" && request.change !== "type_change") || (origin.type === "TSType" && request.change !== "rename");
+
   // Edges leaving a node: its own, plus coverage edges of its asset.
   const edgesFrom = (n: GraphNode): GraphEdge[] => {
     const own = out.get(n.id) ?? [];
+    if (n.id === origin.id && wholeAsset) return [...own, ...(children.get(n.id) ?? []).flatMap((c) => out.get(c.id) ?? [])];
     if (!n.parent) return own;
     const coverage = (out.get(n.parent) ?? []).filter((e) => COVERAGE_EDGES.has(e.type));
     return [...own, ...coverage];
@@ -106,16 +158,7 @@ export function computeImpact(graph: Graph, request: ChangeRequest): ImpactRepor
     const item = items.get(id)!;
     const n = byId.get(id)!;
     for (const e of edgesFrom(n)) {
-      let severity: Severity;
-      if (item.severity === "breaking") {
-        severity = RULE_SEVERITY[e.rule];
-      } else if (item.severity === "needs_update" && COVERAGE_EDGES.has(e.type)) {
-        // The asset still changes, so its tests and docs still need a look.
-        severity = "update";
-      } else {
-        // Behind an alias, a doc or a test: downstream is safe.
-        severity = "safe";
-      }
+      const severity = severityFor(request, { severity: item.severity, isOrigin: id === origin.id, type: n.type }, e);
       if (setItem(e.to, severity, item.depth + 1, e)) queue.push(e.to);
     }
   }
@@ -181,7 +224,7 @@ export function computeImpact(graph: Graph, request: ChangeRequest): ImpactRepor
     });
 
   // Grep comparison, by file: which files contain the old name as plain text?
-  const oldName = shortName(origin.name);
+  const oldName = shortName(origin.name.replace(/\(\)$/, ""));
   const found = graph.textIndex?.[oldName] ?? [
     ...new Set(graph.nodes.filter((n) => n.tokens?.includes(oldName)).map((n) => n.file)),
   ];

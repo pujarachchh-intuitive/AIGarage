@@ -199,6 +199,7 @@ function ownerAt(fileName, pos) {
 // Pass 1: declarations -> nodes.
 // ---------------------------------------------------------------------------
 const declared = []; // { id, sf, nameNode, kind }
+const typeDecls = []; // interfaces, classes and type aliases: { id, sf, nameNode }
 
 for (const f of files) {
   const sf = program.getSourceFile(f);
@@ -220,6 +221,7 @@ for (const f of files) {
       const id = `type:${stmt.name.text}`;
       addNode({ id, type: "TSType", layer: layer === "types" ? "types" : layer, name: stmt.name.text, file: r, line: lineOf(sf, stmt.getStart(sf)), criticality: layer === "types" ? "high" : "medium" });
       addRange(sf, stmt, id);
+      typeDecls.push({ id, sf, nameNode: stmt.name });
       for (const m of stmt.members) {
         if (!ts.isPropertySignature(m) || !m.name || !ts.isIdentifier(m.name)) continue;
         const fid = `field:${stmt.name.text}.${m.name.text}`;
@@ -235,6 +237,7 @@ for (const f of files) {
       const id = `type:${stmt.name.text}`;
       addNode({ id, type: "TSType", layer, name: stmt.name.text, file: r, line: lineOf(sf, stmt.getStart(sf)), criticality: layer === "types" ? "high" : "medium" });
       addRange(sf, stmt, id);
+      typeDecls.push({ id, sf, nameNode: stmt.name });
       for (const m of stmt.members) {
         if (!ts.isPropertyDeclaration(m) || !m.name || !ts.isIdentifier(m.name)) continue;
         const fid = `field:${stmt.name.text}.${m.name.text}`;
@@ -246,6 +249,7 @@ for (const f of files) {
       const id = `type:${stmt.name.text}`;
       addNode({ id, type: "TSType", layer, name: stmt.name.text, file: r, line: lineOf(sf, stmt.getStart(sf)), criticality: layer === "types" ? "high" : "medium" });
       addRange(sf, stmt, id);
+      typeDecls.push({ id, sf, nameNode: stmt.name });
     } else if (ts.isFunctionDeclaration(stmt) && stmt.name && (layer === "logic" || layer === "types")) {
       const id = `fn:${stmt.name.text}`;
       addNode({ id, type: "Function", layer, name: `${stmt.name.text}()`, file: r, line: lineOf(sf, stmt.getStart(sf)) });
@@ -351,6 +355,18 @@ for (const d of declared) {
   }
 }
 
+// Uses of a type (annotations, generics, implements). After the pass above, so a
+// field typed with an alias keeps its TYPED_AS link. Using a type does not break
+// when the type changes inside, so these are passthrough links.
+for (const d of typeDecls) {
+  for (const ref of referencesOf(d.sf, d.nameNode)) {
+    const refSf = program.getSourceFile(ref.fileName);
+    if (isInsideImport(refSf, ref.pos)) continue;
+    const owner = ownerAt(ref.fileName, ref.pos);
+    if (owner && nodes.has(owner)) addEdge(d.id, owner, "CONSUMES", "passthrough", `${rel(ref.fileName)}:${ref.line}`);
+  }
+}
+
 progress("references", `Found ${edges.size} links`, { edges: edges.size });
 
 // String keys typed as `keyof SomeInterface` (e.g. key: "totalMau").
@@ -402,6 +418,155 @@ for (const f of docFiles) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Pass 4: database schema (Prisma schemas and SQL files).
+// Tables and columns become nodes in the "database" district. A column links to
+// the code that uses it: TS files that name both the column and its table or
+// model, SQL files that are not migrations, TS fields with the same name on a
+// type of the same name, and docs. Old migrations are history: never linked.
+// ---------------------------------------------------------------------------
+progress("docs", "Reading database schemas");
+const PII_NAME = /(^|_)(e?mail|phone|mobile|address|street|zip|postcode|first_?name|last_?name|full_?name|ssn|dob|birth|passport|password|ip_?address)(_|$)/i;
+const GENERIC_COLUMN = /^(id|uuid|name|type|status|state|kind|value|data|created_?at|updated_?at|deleted_?at|createdAt|updatedAt|deletedAt)$/;
+const isMigration = (r) => /(^|\/)migrations?\//i.test(r);
+const words = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+/** Names code may use for a table or model: users, user, Users, User. */
+function tableAliases(name) {
+  const base = words(name).replace(/^.*\./, "");
+  const singular = base.replace(/ies$/, "y").replace(/s$/, "");
+  const camel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  return [...new Set([base, singular, `${singular}s`, camel(base), camel(singular)])].filter((a) => a.length > 1);
+}
+const tables = new Map(); // table id -> { name, aliases }
+function addTable(name, file, line) {
+  const id = `db:table:${name}`;
+  if (!tables.has(id)) {
+    addNode({ id, type: "Table", layer: "database", name, file, line, criticality: "high" });
+    tables.set(id, { name, aliases: tableAliases(name) });
+  }
+  return id;
+}
+function addColumn(table, column, file, line) {
+  const id = `db:column:${table}.${column}`;
+  addNode({ id, type: "Column", layer: "database", name: `${table}.${column}`, file, line, parent: `db:table:${table}`, criticality: "high", pii: PII_NAME.test(words(column)) });
+  return id;
+}
+
+// Prisma: model Name { field Type ... }. Relation fields (another model's type) are skipped.
+const PRISMA_SCALARS = new Set(["String", "Int", "BigInt", "Float", "Decimal", "Boolean", "DateTime", "Json", "Bytes"]);
+for (const f of allFiles.filter((x) => x.endsWith(".prisma"))) {
+  const r = rel(f);
+  const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
+  const enums = new Set(lines.map((l) => l.match(/^\s*enum\s+(\w+)/)?.[1]).filter(Boolean));
+  let model = null;
+  lines.forEach((l, i) => {
+    const m = l.match(/^\s*model\s+(\w+)\s*\{/);
+    if (m) {
+      model = m[1];
+      addTable(model, r, i + 1);
+      return;
+    }
+    if (/^\s*\}/.test(l)) model = null;
+    if (!model) return;
+    const fld = l.match(/^\s*(\w+)\s+(\w+)(\[\])?\??/);
+    if (fld && (PRISMA_SCALARS.has(fld[2]) || enums.has(fld[2])) && !fld[3]) addColumn(model, fld[1], r, i + 1);
+  });
+}
+
+// SQL: CREATE TABLE name (...) and ALTER TABLE name ADD [COLUMN] col.
+const sqlFiles = allFiles.filter((x) => x.endsWith(".sql") && fs.statSync(x).size < 1_000_000);
+const SQL_NOT_COLUMN = /^(primary|foreign|constraint|unique|check|key|index|exclude|like)$/i;
+const ident = (s) => s.replace(/["`[\]]/g, "").split(".").pop();
+for (const f of sqlFiles) {
+  const r = rel(f);
+  const text = fs.readFileSync(f, "utf8");
+  const lineAt = (pos) => text.slice(0, pos).split("\n").length;
+  for (const m of text.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."`[\]]+)\s*\(/gi)) {
+    const table = ident(m[1]);
+    addTable(table, r, lineAt(m.index));
+    // Column list: up to the matching close paren.
+    let depth = 1;
+    let i = m.index + m[0].length;
+    const startBody = i;
+    while (i < text.length && depth > 0) {
+      if (text[i] === "(") depth++;
+      else if (text[i] === ")") depth--;
+      i++;
+    }
+    let offset = startBody;
+    for (const part of text.slice(startBody, i - 1).split(/,(?![^(]*\))/)) {
+      const col = part.trim().match(/^([\w"`[\]]+)\s+\w/);
+      if (col && !SQL_NOT_COLUMN.test(ident(col[1]))) addColumn(table, ident(col[1]), r, lineAt(offset + part.indexOf(col[1])));
+      offset += part.length + 1;
+    }
+  }
+  for (const m of text.matchAll(/alter\s+table\s+(?:only\s+)?([\w."`[\]]+)\s+add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?([\w"`[\]]+)/gi)) {
+    const table = ident(m[1]);
+    if (SQL_NOT_COLUMN.test(ident(m[2]))) continue;
+    addTable(table, r, lineAt(m.index));
+    addColumn(table, ident(m[2]), r, lineAt(m.index));
+  }
+}
+
+const columns = [...nodes.values()].filter((n) => n.type === "Column" && n.layer === "database").slice(0, 600);
+if (columns.length > 0) {
+  const wordIn = (w) => new RegExp(`\\b${w.replace(/[$]/g, "\\$")}\\b`);
+  const aliasRe = (aliases) => new RegExp(`\\b(${aliases.join("|")})\\b`, "i");
+  const tsTexts = files.map((f) => [f, rel(f), fs.readFileSync(f, "utf8")]);
+  const tsFields = [...nodes.values()].filter((n) => n.type === "TSField");
+  for (const col of columns) {
+    const [table, column] = [col.name.slice(0, col.name.lastIndexOf(".")), col.name.slice(col.name.lastIndexOf(".") + 1)];
+    const t = tables.get(`db:table:${table}`);
+    const colRe = wordIn(column);
+    const camel = column.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    const tRe = aliasRe(t.aliases.map((a) => a.replace(/[$]/g, "\\$")));
+    // A TS field with the same name on a type named like the table (User.email <-> users.email).
+    for (const fld of tsFields) {
+      const [typeName, fieldName] = fld.name.split(".");
+      if ((fieldName === column || fieldName === camel) && t.aliases.some((a) => a.toLowerCase() === typeName.toLowerCase())) {
+        addEdge(col.id, fld.id, "MAPS_TO", "rename_ref", `${fld.file}:${fld.line} (${typeName}.${fieldName} maps ${table}.${column})`, "medium");
+      }
+    }
+    // TS code that names the column with the table or model nearby: within 5
+    // lines, or on the same line for common names like "id". Fields of types are
+    // covered by MAPS_TO above.
+    const window = GENERIC_COLUMN.test(column) ? 0 : 5;
+    for (const [f, r, text] of tsTexts) {
+      if (!tRe.test(text)) continue;
+      const lines = text.split("\n");
+      for (const name of new Set([column, camel])) {
+        const re = new RegExp(`\\b${name}\\b`, "g");
+        for (const hit of text.matchAll(re)) {
+          const line = text.slice(0, hit.index).split("\n").length;
+          if (!tRe.test(lines.slice(Math.max(0, line - 1 - window), line + window).join("\n"))) continue;
+          const owner = ownerAt(f, hit.index) ?? [...nodes.values()].find((n) => n.file === r && n.type !== "TSField")?.id;
+          if (!owner || owner === col.id || nodes.get(owner)?.type === "TSField" || nodes.get(owner)?.type === "TSType") continue;
+          addEdge(col.id, owner, "READS", "rename_ref", `${r}:${line} (column ${column})`, "medium");
+        }
+      }
+    }
+    // SQL that is not a migration and not the file that defines the column.
+    for (const f of sqlFiles) {
+      const r = rel(f);
+      if (r === col.file || isMigration(r)) continue;
+      const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
+      const i = lines.findIndex((l) => colRe.test(l));
+      if (i < 0 || !tRe.test(lines.join("\n"))) continue;
+      const sqlId = `sql:${r}`;
+      addNode({ id: sqlId, type: "SQLModel", layer: "database", name: path.posix.basename(r), file: r, line: 1 });
+      addEdge(col.id, sqlId, "READS", "rename_ref", `${r}:${i + 1}`, "medium");
+    }
+    // Docs that name the table and the column on one line.
+    for (const f of docFiles) {
+      const r = rel(f);
+      const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
+      const i = lines.findIndex((l) => colRe.test(l) && tRe.test(l));
+      if (i >= 0) addEdge(col.id, `doc:${r}`, "DOCUMENTS", "update_doc", `${r}:${i + 1}`, "medium");
+    }
+  }
+  progress("docs", `${tables.size} tables and ${columns.length} columns`);
+}
+
 // Business use: the README route table says what each page is for.
 const readme = allFiles.find((f) => rel(f) === "README.md");
 if (readme) {
@@ -421,10 +586,14 @@ if (readme) {
 // ---------------------------------------------------------------------------
 // Grep index: which files contain each field name as plain text.
 // ---------------------------------------------------------------------------
-const textFiles = allFiles.filter((f) => /\.(tsx?|jsx?|mjs|cjs|mdx?|json|ya?ml|css)$/.test(f) && !/(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(f) && fs.statSync(f).size < 1_000_000);
+const textFiles = allFiles.filter((f) => /\.(tsx?|jsx?|mjs|cjs|mdx?|json|ya?ml|css|sql|prisma)$/.test(f) && !/(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(f) && fs.statSync(f).size < 1_000_000);
 const texts = textFiles.map((f) => [rel(f), fs.readFileSync(f, "utf8")]);
 const textIndex = {};
-for (const word of new Set(fields.map((n) => n.name.split(".")[1]))) {
+// Every name a change can target: fields, columns, functions, types, constants.
+const shortNames = [...nodes.values()]
+  .filter((n) => ["TSField", "Column", "Function", "TSType", "Constant", "Dataset", "Component"].includes(n.type))
+  .map((n) => n.name.replace(/\(\)$/, "").split(".").pop());
+for (const word of new Set(shortNames)) {
   const re = new RegExp(`\\b${word}\\b`);
   textIndex[word] = texts.filter(([, t]) => re.test(t)).map(([r]) => r);
 }
@@ -434,7 +603,7 @@ for (const word of new Set(fields.map((n) => n.name.split(".")[1]))) {
 // Lines of code, language, top-level folder, and resolved local imports.
 // ---------------------------------------------------------------------------
 progress("imports", "Mapping files and imports for the 3D city");
-const LANGUAGE = { ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript", md: "markdown", mdx: "markdown", json: "json", css: "css", yml: "yaml", yaml: "yaml" };
+const LANGUAGE = { ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript", md: "markdown", mdx: "markdown", json: "json", css: "css", yml: "yaml", yaml: "yaml", sql: "sql", prisma: "prisma" };
 const cityFiles = allFiles
   .map((f) => ({ f, r: rel(f), ext: path.extname(f).slice(1).toLowerCase() }))
   .filter(({ f, r, ext }) => LANGUAGE[ext] && !r.split("/").some((p) => p.startsWith(".")) && !/(^|\/)(package-lock\.json|pnpm-lock\.yaml)$/.test(r) && r !== "next-env.d.ts" && !r.startsWith("public/") && fs.statSync(f).size < 1_000_000)
@@ -461,6 +630,7 @@ for (const x of cityFiles) x.imports = x.imports.filter((p) => knownPaths.has(p)
 // ---------------------------------------------------------------------------
 // Only the layers this repo actually uses, in data-flow order.
 const LAYER_DEFS = [
+  { id: "database", label: "Database", requiresApproval: true, check: "Schema edited; new migration added, old ones untouched" },
   { id: "types", label: "Types", requiresApproval: true, check: "tsc passed" },
   { id: "data", label: "Data", check: "tsc passed; data matches the type" },
   { id: "logic", label: "Logic", check: "tsc passed" },

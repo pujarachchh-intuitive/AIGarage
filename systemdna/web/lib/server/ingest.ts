@@ -3,6 +3,7 @@
 //   1. Fetch    git clone (public URL) or unzip (upload) into a temp folder
 //   2. Check    size and file-count limits
 //   3. Scan     run core/scanner/ts-scan.mjs in its own process (it only reads files)
+//   3b. Enrich  optional: the IBM Bob Cartographer adds links the parser cannot see
 //   4. Save     graph.json + index entry (repo-store)
 //   5. Clean    delete the temp folder, always
 //
@@ -17,10 +18,16 @@ import { promises as fs, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { unzipSync } from "fflate";
+import { enrichWithBob } from "@/lib/server/bob-cartographer";
 import { makeRepoId, saveRepo, type RepoEntry, type RepoStats } from "@/lib/server/repo-store";
 import type { IngestEvent } from "@/lib/types";
 
 type Emit = (e: IngestEvent) => void;
+
+export interface IngestOptions {
+  /** Run the IBM Bob Cartographer after the parser scan. */
+  bob?: boolean;
+}
 
 export const LIMITS = {
   zipBytes: 50 * 1024 * 1024,
@@ -119,7 +126,7 @@ async function unzipTo(data: Uint8Array, dir: string) {
   }
 }
 
-async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt" | "stats">, emit: Emit, existingId?: string) {
+async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt" | "stats">, emit: Emit, existingId?: string, opts: IngestOptions = {}) {
   const scanStart = Date.now();
   const size = await measure(dir);
   if (size.files > LIMITS.repoFiles) throw new Error(`The repo has more than ${LIMITS.repoFiles} files. Try a smaller repo or a sub-folder.`);
@@ -147,7 +154,19 @@ async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt"
     },
   });
   if (!stats) throw new Error("The scanner finished without a result.");
-  const entry: RepoEntry = { ...meta, id: existingId ?? makeRepoId(meta.name), scannedAt: new Date().toISOString(), stats };
+  let finalStats: RepoStats = stats;
+  if (opts.bob) {
+    emit({ type: "progress", step: "bob", detail: "IBM Bob Cartographer is reading the code for links the parser cannot see" });
+    const bob = await enrichWithBob(dir, out);
+    if (bob.status === "done") {
+      finalStats = { ...finalStats, edges: finalStats.edges + bob.links, bobLinks: bob.links, bobPii: bob.pii };
+      emit({ type: "progress", step: "bob", detail: `Bob added ${bob.links} links and flagged ${bob.pii} personal-data fields${bob.bobcoins !== undefined ? ` (${bob.bobcoins.toFixed(2)} Bobcoins)` : ""}` });
+    } else {
+      finalStats = { ...finalStats, bobLinks: 0, bobPii: 0 };
+      emit({ type: "progress", step: "bob", detail: `Bob Cartographer skipped: ${bob.reason}` });
+    }
+  }
+  const entry: RepoEntry = { ...meta, id: existingId ?? makeRepoId(meta.name), scannedAt: new Date().toISOString(), stats: finalStats };
   await saveRepo(entry, out, Date.now() - scanStart);
   emit({ type: "progress", step: "saved", detail: "Saved the knowledge graph" });
   return entry;
@@ -167,7 +186,7 @@ export async function withWorkspace<T>(fn: (dir: string) => Promise<T>): Promise
   }
 }
 
-export async function ingestGit(url: string, ref: string | undefined, emit: Emit, existingId?: string) {
+export async function ingestGit(url: string, ref: string | undefined, emit: Emit, existingId?: string, opts: IngestOptions = {}) {
   const bad = validateGitInput(url, ref);
   if (bad) throw new Error(bad);
   const name = url.replace(/^https:\/\/[^/]+\//, "").replace(/\.git\/?$|\/$/g, "");
@@ -180,18 +199,18 @@ export async function ingestGit(url: string, ref: string | undefined, emit: Emit
       throw new Error(/not found|Repository not found|could not read Username/i.test(err.message) ? "We could not read that repository. Check the URL and that the repo is public." : err.message);
     });
     emit({ type: "progress", step: "fetched", detail: "Code downloaded" });
-    return scanAndSave(dir, { name, source: "git", url, ref: ref || undefined }, emit, existingId);
+    return scanAndSave(dir, { name, source: "git", url, ref: ref || undefined }, emit, existingId, opts);
   });
 }
 
-export async function ingestZip(file: File, emit: Emit) {
+export async function ingestZip(file: File, emit: Emit, opts: IngestOptions = {}) {
   if (file.size > LIMITS.zipBytes) throw new Error(`The zip is larger than ${LIMITS.zipBytes / 1024 / 1024} MB.`);
   const name = file.name.replace(/\.zip$/i, "").replace(/-(main|master)$/, "") || "upload";
   return withWorkspace(async (dir) => {
     emit({ type: "progress", step: "fetch", detail: `Unpacking ${file.name}` });
     await unzipTo(new Uint8Array(await file.arrayBuffer()), dir);
     emit({ type: "progress", step: "fetched", detail: "Files unpacked" });
-    return scanAndSave(dir, { name, source: "zip" }, emit);
+    return scanAndSave(dir, { name, source: "zip" }, emit, undefined, opts);
   });
 }
 

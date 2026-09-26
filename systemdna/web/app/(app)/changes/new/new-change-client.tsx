@@ -15,19 +15,23 @@ import {
 } from "@/components/changes/impact-report";
 import { Card, PageHeader, PageShell, inputClass, primaryButton, secondaryButton } from "@/components/ui/page";
 import { analyseChange, DATA_MODE, demoRepo, runChange } from "@/lib/api";
+import { CHANGEABLE, changeTitle, KINDS, kindsFor, symbolName, validateChange } from "@/lib/changes";
 import { cn } from "@/lib/cn";
-import { shortName } from "@/lib/impact";
 import { useApp } from "@/lib/store";
-import type { ChangeKind, Graph, ImpactReport, Severity } from "@/lib/types";
+import type { ChangeKind, Graph, ImpactReport, NodeType, Severity } from "@/lib/types";
 
-const RENAMEABLE = new Set(["Column", "Field", "TSField"]);
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-const KINDS: { id: ChangeKind; label: string; enabled: boolean }[] = [
-  { id: "rename", label: "Rename", enabled: true },
-  { id: "type_change", label: "Change type", enabled: false },
-  { id: "delete", label: "Delete", enabled: false },
-];
+const CHANGEABLE_SET = new Set<NodeType>(CHANGEABLE);
+const TYPE_LABEL: Partial<Record<NodeType, string>> = {
+  TSField: "field",
+  Column: "column",
+  Field: "field",
+  Table: "table",
+  TSType: "type",
+  Function: "function",
+  Constant: "constant",
+  Dataset: "dataset",
+  Component: "component",
+};
 
 /** How long the "AI is working" scan plays at least. The real analysis takes a few ms. */
 const SCAN_MS = 2600;
@@ -78,16 +82,16 @@ export function NewChangeClient() {
   const addChange = useApp((s) => s.addChange);
   const nextChangeId = useApp((s) => s.nextChangeId);
   const repoId = useApp((s) => s.repoId);
-  // Samples have a preset demo change; connected repos start on their first renameable field.
-  const firstField = graph?.nodes.find((n) => RENAMEABLE.has(n.type))?.id ?? "";
+  // Samples have a preset demo change; connected repos start on their first field or column.
+  const firstField = (graph?.nodes.find((n) => n.type === "Column" || n.type === "TSField") ?? graph?.nodes.find((n) => CHANGEABLE_SET.has(n.type)))?.id ?? "";
   const defaults = demoRepo(repoId)?.defaultChange ?? { node: firstField, to: "" };
 
   const [picked, setNodeId] = useState<string | null>(params.get("node"));
-  const [kind, setKind] = useState<ChangeKind>("rename");
+  const [pickedKind, setKind] = useState<ChangeKind>("rename");
   const [typed, setTo] = useState<string | null>(null);
+  const [description, setDescription] = useState("");
   // Fall back to the repo's demo change until the user picks something.
   const nodeId = picked && graph?.nodes.some((n) => n.id === picked) ? picked : defaults.node;
-  const to = typed ?? (nodeId === defaults.node ? defaults.to : "");
   const [busy, setBusy] = useState(false);
   // The node the AI scan starts from while the analysis runs.
   const [scanning, setScanning] = useState<string | null>(null);
@@ -98,21 +102,20 @@ export function NewChangeClient() {
     () =>
       (graph?.layers ?? []).map((l) => ({
         layer: l,
-        nodes: (graph?.nodes ?? []).filter((n) => n.layer === l.id && RENAMEABLE.has(n.type)),
+        nodes: (graph?.nodes ?? []).filter((n) => n.layer === l.id && CHANGEABLE_SET.has(n.type)),
       })).filter((g) => g.nodes.length > 0),
     [graph],
   );
 
   const node = graph?.nodes.find((n) => n.id === nodeId);
-  const oldName = node ? shortName(node.name) : "";
-  const nameError =
-    to.length === 0
-      ? "Enter the new name."
-      : !IDENTIFIER.test(to)
-        ? "Use letters, numbers and underscores. Start with a letter."
-        : to === oldName
-          ? "The new name is the same as the old one."
-          : null;
+  const kinds = kindsFor(node?.type);
+  // A kind that does not apply to the picked component falls back to Rename.
+  const kind: ChangeKind = kinds.some((k) => k.id === pickedKind) ? pickedKind : "rename";
+  const kindDef = KINDS.find((k) => k.id === kind)!;
+  const to = typed ?? (nodeId === defaults.node && kind === "rename" ? defaults.to : "");
+  const oldName = node ? symbolName(node) : "";
+  const nameError = validateChange(node, kind, kindDef.input ? to : "", description);
+  const reset = () => setResult(null);
 
   const severity = useMemo(() => {
     if (!result) return undefined;
@@ -128,7 +131,12 @@ export function NewChangeClient() {
     try {
       // Let the scan play out, so the user sees the AI walk the graph.
       const [res] = await Promise.all([
-        analyseChange(graph, { node: node.id, change: kind, to }),
+        analyseChange(graph, {
+          node: node.id,
+          change: kind,
+          to: kindDef.input ? to.trim() : "",
+          ...(description.trim() ? { description: description.trim() } : {}),
+        }),
         new Promise((r) => setTimeout(r, reduced ? 0 : SCAN_MS)),
       ]);
       setResult(res);
@@ -149,7 +157,7 @@ export function NewChangeClient() {
       addChange({
         id,
         repo: graph?.repo,
-        title: `Rename ${node.name} to ${to}`,
+        title: changeTitle(node, result.report.request),
         request: result.report.request,
         report: result.report,
         createdAt: new Date().toISOString(),
@@ -184,7 +192,7 @@ export function NewChangeClient() {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <Card title="Change request" subtitle="Rename works end to end today." className="lg:col-span-4 h-fit">
+        <Card title="Change request" subtitle="Rename, change a type or signature, delete, or describe any change." className="lg:col-span-4 h-fit">
           <div className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5">
               <span className="type-label">Component</span>
@@ -194,7 +202,7 @@ export function NewChangeClient() {
                   onChange={(e) => {
                     setNodeId(e.target.value);
                     setTo(null);
-                    setResult(null);
+                    reset();
                   }}
                   className={cn(inputClass, "appearance-none pr-9 cursor-pointer")}
                 >
@@ -202,7 +210,7 @@ export function NewChangeClient() {
                     <optgroup key={g.layer.id} label={g.layer.label}>
                       {g.nodes.map((n) => (
                         <option key={n.id} value={n.id}>
-                          {n.name}
+                          {n.name} · {TYPE_LABEL[n.type] ?? n.type}
                         </option>
                       ))}
                     </optgroup>
@@ -216,39 +224,79 @@ export function NewChangeClient() {
             <div className="flex flex-col gap-1.5">
               <span className="type-label">Change</span>
               <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-surface-secondary border border-border">
-                {KINDS.map((k) => (
-                  <button
-                    key={k.id}
-                    disabled={!k.enabled}
-                    onClick={() => setKind(k.id)}
-                    title={k.enabled ? undefined : "Stretch goal: not built yet"}
-                    className={cn(
-                      "h-8 rounded-md text-body font-semibold transition-colors",
-                      kind === k.id ? "bg-surface text-text-primary shadow-2xs border border-border" : "text-text-tertiary",
-                      k.enabled ? "cursor-pointer hover:text-text-primary" : "opacity-50 cursor-not-allowed",
-                    )}
-                  >
-                    {k.label}
-                  </button>
-                ))}
+                {KINDS.map((k) => {
+                  const enabled = kinds.some((x) => x.id === k.id);
+                  return (
+                    <button
+                      key={k.id}
+                      disabled={!enabled}
+                      onClick={() => {
+                        setKind(k.id);
+                        setTo(null);
+                        reset();
+                      }}
+                      title={enabled ? undefined : `Not available for a ${TYPE_LABEL[node?.type ?? "Field"] ?? "component"}`}
+                      className={cn(
+                        "h-8 rounded-md text-body font-semibold transition-colors",
+                        kind === k.id ? "bg-surface text-text-primary shadow-2xs border border-border" : "text-text-tertiary",
+                        enabled ? "cursor-pointer hover:text-text-primary" : "opacity-50 cursor-not-allowed",
+                      )}
+                    >
+                      {k.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
+            {kindDef.input ? (
+              <label className="flex flex-col gap-1.5">
+                <span className="type-label">{kindDef.input.label}</span>
+                <input
+                  value={to}
+                  onChange={(e) => {
+                    setTo(kind === "rename" ? e.target.value.trim() : e.target.value);
+                    reset();
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && void analyse()}
+                  className={cn(inputClass, kind === "signature" && "font-mono text-caption")}
+                  placeholder={kind === "signature" && node ? `${oldName}(…): …` : kindDef.input.placeholder}
+                />
+                <span className={cn("type-caption", nameError && to.length > 0 && "text-error")}>
+                  {nameError && to.length > 0
+                    ? nameError
+                    : kind === "rename"
+                      ? `${oldName || "…"} → ${to || "…"}`
+                      : kind === "type_change"
+                        ? `${node?.name ?? "…"} becomes ${to || "…"}`
+                        : `Callers of ${oldName || "…"} will be updated to the new signature.`}
+                </span>
+              </label>
+            ) : kind === "delete" ? (
+              <p className="type-caption">
+                Removes <span className="font-semibold text-text-primary">{node?.name}</span>. Every direct user must stop using it; the agents decide how, following your notes below.
+              </p>
+            ) : null}
+
             <label className="flex flex-col gap-1.5">
-              <span className="type-label">New name</span>
-              <input
-                value={to}
+              <span className="type-label">{kind === "custom" ? "Describe the change" : "Notes for the agents (optional)"}</span>
+              <textarea
+                value={description}
                 onChange={(e) => {
-                  setTo(e.target.value.trim());
-                  setResult(null);
+                  setDescription(e.target.value);
+                  reset();
                 }}
-                onKeyDown={(e) => e.key === "Enter" && void analyse()}
-                className={inputClass}
-                placeholder="customer_id"
+                rows={kind === "custom" ? 4 : 2}
+                className={cn(inputClass, "h-auto py-2 resize-y")}
+                placeholder={
+                  kind === "custom"
+                    ? `For example: split ${oldName || "fullName"} into firstName and lastName, keeping existing data.`
+                    : kind === "delete"
+                      ? "For example: use displayName instead."
+                      : "Anything the agents should know."
+                }
               />
-              <span className={cn("type-caption", nameError && to.length > 0 && "text-error")}>
-                {nameError && to.length > 0 ? nameError : `${oldName || "…"} → ${to || "…"}`}
-              </span>
+              {kind === "custom" && nameError && description.length > 0 ? <span className="type-caption text-error">{nameError}</span> : null}
             </label>
 
             <button className={cn(primaryButton, "justify-center", busy && "ai-working disabled:opacity-100")} disabled={!graph || !!nameError || busy} onClick={analyse}>

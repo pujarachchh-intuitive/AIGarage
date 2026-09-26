@@ -50,19 +50,26 @@ What happens (the page shows each step live):
 | `POST /api/repos/{id}/rescan` | Pull the latest code and rebuild (git repos) |
 | `DELETE /api/repos/{id}` | Remove the repo and its graph |
 
-## GitHub agent
+## Real change runs and pull requests
 
-On a change page, the **GitHub agent** panel makes the change in the real repo and opens a draft pull request.
+For a repo on github.com, the change page runs the change for real (`lib/server/change-agent.ts`); samples without code (ShopFlow) keep the simulator.
 
-1. **Preview changes**: fresh clone, rename with the TypeScript compiler (`core/scanner/ts-rename.mjs`), rename `keyof` string keys and docs, then check that no file gains new type errors. Shows the diff. Nothing is pushed.
-2. **Open draft pull request** (after you confirm): new branch `systemdna/<change>-...`, one commit, push, draft PR with the impact report as its description. The default branch is never touched.
+1. **Approval**: files in protected districts (Database, Types) or with personal data wait for **Approve**.
+2. **Run** in a fresh clone, wave by wave:
+   - Renames of TypeScript symbols: the TypeScript compiler (`core/scanner/ts-rename.mjs`), one pass, reported per file.
+   - Everything else (type change, signature, delete, free text, database changes): one **IBM Bob Fixer** per file with a permit for that file only (plus new migrations for the schema file). Out-of-permit edits are reverted (*Blocked*); each edit is type-checked (`core/scanner/ts-check.mjs`), retried once with the errors, then rolled back if still failing (*Quarantined*). Budget: `BOB_RUN_MAX_COST` Bobcoins.
+3. **Verify**: type check of every touched file, then the IBM Bob Inspector reviews the diff.
+4. **Pull request** panel: the diff, the review and any remaining type errors. **Open draft pull request** (after you confirm) applies the stored diff to a fresh clone, pushes a new branch `systemdna/<change>` and opens a draft PR. The default branch is never touched, and no agent runs twice.
 
 | Method and path | Does |
 | --- | --- |
-| `GET /api/github/status` | Whether a token is set, and whose (never returns the token) |
-| `POST /api/github/pull-requests` | `{ url, field, to, changeId, title, body, dryRun }`. Streams progress, then the diff, then the PR |
+| `POST /api/changes/run` | `ChangeRunRequest`. Streams `ChangeStreamLine`: run events, status, the Bob review, the diff with a `patchId` |
+| `POST /api/changes/pull-request` | `{ patchId, title, body }`. Streams progress, then the PR |
+| `GET /api/github/status` | GitHub App, token or nothing; with `?repo=<url>`, whether the app is installed there. Never returns a secret |
+| `GET /api/github/install/callback` | Where GitHub sends users after they install the app; redirects to Repositories |
+| `POST /api/github/pull-requests` | The original field-rename agent: `{ url, field, to, changeId, title, body, dryRun }` |
 
-Signs in as a **GitHub App** (preferred): set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and `GITHUB_APP_PRIVATE_KEY_PATH`, then install the app on the repo from the Repositories page. The agent gets a 1-hour token for that one repo, and PRs show up as `<slug>[bot]`. A personal `GITHUB_TOKEN` works as a fallback. Renames of TypeScript fields only, today. Full steps: `../STATUS.md`, section 4.
+Opening PRs signs in as a **GitHub App** (preferred): set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and `GITHUB_APP_PRIVATE_KEY_PATH`, then install the app on the repo from the Repositories page. The agent gets a 1-hour token for that one repo, and PRs show up as `<slug>[bot]`. A personal `GITHUB_TOKEN` (a fine-grained token with Contents and Pull requests write access) works as a fallback. Full steps: `../STATUS.md`, section 4.
 
 ## Settings
 
@@ -76,9 +83,11 @@ Copy `.env.example` to `.env.local`.
 | `GITHUB_APP_ID` | empty | GitHub App id. When set, the agent uses the app instead of `GITHUB_TOKEN` |
 | `GITHUB_APP_SLUG` | empty | The app's URL name (`github.com/apps/<slug>`), for the install link |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | empty | Path to the app's `.pem` file. Keep it outside the repo |
-| `GITHUB_APP_PRIVATE_KEY` | empty | The key inline instead of a file (`
-` for new lines). Handy on AWS |
+| `GITHUB_APP_PRIVATE_KEY` | empty | The key inline instead of a file (`\n` for new lines). Handy on AWS |
 | `GITHUB_TOKEN` | empty | Fallback: a personal token for pushing branches and opening draft PRs |
+| `BOB_API_KEY` | empty | IBM Bob Shell key: turns on the Bob Inspector (reviews GitHub agent diffs) and Bob Cartographer (enriches connected repos). Needs the `bob` CLI |
+| `BOB_CLI` | `bob` on `PATH` | Path to the Bob Shell CLI |
+| `BOB_TIMEOUT_MS`, `BOB_MAX_COST`, `BOB_MAX_TURNS` | 240000, 3, 20 | Limits per Bob run |
 
 The server also needs `git` installed.
 
