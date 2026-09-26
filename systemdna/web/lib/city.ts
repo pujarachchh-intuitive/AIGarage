@@ -1,16 +1,63 @@
 // Data for the 3D city view: one building per file, one plate per top-level folder.
 
-import type { Graph, RepoFile } from "@/lib/types";
+import type { Graph, GraphNode, NodeType, RepoFile } from "@/lib/types";
+import { accentForLayer } from "@/lib/palette";
+
+/** What a file is, from the kinds of component it holds. Drives the building's form. */
+export type Archetype = "storage" | "transform" | "logic" | "interface" | "contract" | "ui" | "insight" | "business" | "quality";
+
+export const ARCHETYPE_LABEL: Record<Archetype, string> = {
+  storage: "Storage",
+  transform: "Transform",
+  logic: "Logic",
+  interface: "Interface",
+  contract: "Contract",
+  ui: "Interface (UI)",
+  insight: "Insight",
+  business: "Business process",
+  quality: "Tests and docs",
+};
+
+const TYPE_ARCHETYPE: Record<NodeType, Archetype> = {
+  Table: "storage", Column: "storage", Dataset: "storage",
+  SQLModel: "transform", SparkJob: "transform",
+  Module: "logic", Function: "logic", ORMModel: "logic", Constant: "logic",
+  Schema: "contract", Field: "contract", TSType: "contract", TSField: "contract",
+  Endpoint: "interface",
+  Component: "ui", Page: "ui",
+  Dashboard: "insight",
+  BusinessProcess: "business",
+  Test: "quality", Doc: "quality",
+};
+
+function archetypeByLanguage(path: string, language: string): Archetype {
+  if (["markdown", "document", "json", "yaml"].includes(language)) return "quality";
+  if (/\.test\.|\.spec\.|(^|\/)tests?\//.test(path)) return "quality";
+  if (language === "sql") return "storage";
+  if (path.endsWith(".tsx") || path.endsWith(".jsx")) return "ui";
+  return "logic";
+}
 
 export interface CityFile extends RepoFile {
   importedBy: string[];
   landmark?: "entry" | "core" | "hotspot";
+  archetype: Archetype;
+  /** The layer most of the file's components belong to. */
+  layer: string | null;
+  /** Components (graph nodes) that live in this file. */
+  components: number;
+  untested: number;
+  pii: boolean;
+  critical: boolean;
+  owners: string[];
 }
 
 export interface CityData {
   files: CityFile[];
   districts: { dir: string; files: CityFile[] }[];
-  links: { from: string; to: string }[];
+  /** From importer to imported. bob = at least one link between the two files was found by Bob. */
+  links: { from: string; to: string; bob: boolean }[];
+  layers: { id: string; label: string; accent: string }[];
   stats: { files: number; lines: number; districts: number; links: number; medianLines: number };
   languages: { language: string; lines: number }[];
   landmarks: { entry: string[]; core: string[]; hotspot: string[] };
@@ -53,7 +100,27 @@ export function buildCityData(graph: Graph): CityData {
   const raw = graph.files ?? estimateFiles(graph);
   const importedBy = new Map<string, string[]>();
   for (const f of raw) for (const i of f.imports) importedBy.set(i, [...(importedBy.get(i) ?? []), f.path]);
-  const files: CityFile[] = raw.map((f) => ({ ...f, importedBy: importedBy.get(f.path) ?? [] }));
+  const nodesByFile = new Map<string, GraphNode[]>();
+  for (const n of graph.nodes) nodesByFile.set(n.file, [...(nodesByFile.get(n.file) ?? []), n]);
+  const files: CityFile[] = raw.map((f) => {
+    const ns = nodesByFile.get(f.path) ?? [];
+    const count = <K extends string>(keys: K[]) => {
+      const m = new Map<K, number>();
+      for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
+      return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    };
+    return {
+      ...f,
+      importedBy: importedBy.get(f.path) ?? [],
+      archetype: count(ns.map((n) => TYPE_ARCHETYPE[n.type] ?? "logic")) ?? archetypeByLanguage(f.path, f.language),
+      layer: count(ns.map((n) => n.layer)) ?? null,
+      components: ns.length,
+      untested: ns.filter((n) => !n.tested).length,
+      pii: ns.some((n) => n.pii),
+      critical: ns.some((n) => n.criticality === "high"),
+      owners: [...new Set(ns.map((n) => n.owner).filter((o): o is string => Boolean(o)))],
+    };
+  });
 
   const sortedLines = files.map((f) => f.lines).sort((a, b) => a - b);
   const medianLines = sortedLines.length ? sortedLines[Math.floor(sortedLines.length / 2)] : 0;
@@ -78,7 +145,15 @@ export function buildCityData(graph: Graph): CityData {
     .map(([dir, fs]) => ({ dir, files: fs.sort((a, b) => b.lines - a.lines) }))
     .sort((a, b) => b.files.length - a.files.length);
 
-  const links = files.flatMap((f) => f.imports.map((to) => ({ from: f.path, to })));
+  // Bob-found edges, lifted to file pairs.
+  const fileOf = new Map(graph.nodes.map((n) => [n.id, n.file]));
+  const bobPairs = new Set<string>();
+  for (const e of graph.edges) {
+    const a = fileOf.get(e.from);
+    const b = fileOf.get(e.to);
+    if (e.source === "bob" && a && b && a !== b) bobPairs.add(b + ">" + a);
+  }
+  const links = files.flatMap((f) => f.imports.map((to) => ({ from: f.path, to, bob: bobPairs.has(f.path + ">" + to) })));
   const langMap = new Map<string, number>();
   for (const f of files) langMap.set(f.language, (langMap.get(f.language) ?? 0) + f.lines);
 
@@ -86,6 +161,7 @@ export function buildCityData(graph: Graph): CityData {
     files,
     districts,
     links,
+    layers: (graph.layers ?? []).map((l) => ({ id: l.id, label: l.label, accent: accentForLayer(graph.layers, l.id) })),
     stats: {
       files: files.length,
       lines: files.reduce((n, f) => n + f.lines, 0),
@@ -178,4 +254,31 @@ export function layoutCity(data: CityData, height: "lines" | "imports" = "lines"
     pos.z -= oz;
   }
   return { districts, positions, size: { w: width, d: depth } };
+}
+
+/** The file the landing story renames: the most-used core module. */
+export function storySource(data: CityData) {
+  return data.landmarks.core[0] ?? data.landmarks.hotspot[0] ?? data.files[0]?.path ?? "";
+}
+
+/** Breadth-first rings of files that use `src`: ring 0 is the file itself. */
+export function impactRings(data: CityData, src: string, max = 5) {
+  const byPath = new Map(data.files.map((f) => [f.path, f]));
+  const seen = new Set([src]);
+  const rings: string[][] = [[src]];
+  const edges: { from: string; to: string; ring: number }[] = [];
+  while (rings.length <= max) {
+    const next: string[] = [];
+    for (const p of rings[rings.length - 1]) {
+      for (const u of byPath.get(p)?.importedBy ?? []) {
+        if (seen.has(u)) continue;
+        seen.add(u);
+        next.push(u);
+        edges.push({ from: u, to: p, ring: rings.length });
+      }
+    }
+    if (!next.length) break;
+    rings.push(next);
+  }
+  return { rings, edges };
 }

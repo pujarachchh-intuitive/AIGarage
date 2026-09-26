@@ -104,7 +104,7 @@ export function GovernanceClient() {
               </option>
             ))}
           </select>
-          <ChevronDown className="size-4 text-zinc-400 absolute right-3 top-3 pointer-events-none" />
+          <ChevronDown className="size-4 text-icon-secondary absolute right-3 top-3 pointer-events-none" />
         </div>
       </div>
 

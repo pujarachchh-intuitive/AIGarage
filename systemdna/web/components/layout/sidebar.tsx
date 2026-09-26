@@ -40,8 +40,8 @@ function BranchConnector({ count, activeChildIndex }: { count: number; activeChi
       fill="none"
       className="absolute left-[-1px] top-[-20px] select-none pointer-events-none"
     >
-      <path d={path} stroke="currentColor" className="text-zinc-200 dark:text-zinc-700" strokeWidth="1.5" />
-      {activePath ? <path d={activePath} stroke="currentColor" strokeWidth="1.5" className="text-text-primary" /> : null}
+      <path d={path} stroke="currentColor" className="text-border-strong" strokeWidth="1.5" />
+      {activePath ? <path d={activePath} stroke="currentColor" strokeWidth="1.5" className="text-brand-text" /> : null}
     </svg>
   );
 }
@@ -92,10 +92,13 @@ export default function Sidebar() {
       <div className={cn("flex items-center p-4 h-[60px]", collapsed ? "justify-center" : "justify-between")}>
         {!collapsed ? (
           <Link href="/overview" className="flex items-center gap-3 overflow-hidden">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg border border-border bg-surface shadow-xs shrink-0">
-              <Logo className="w-4 h-4" />
+            <div className="relative flex items-center justify-center w-8 h-8 rounded-lg border border-border bg-surface shrink-0">
+              <Logo className="w-4 h-4 dark:invert" />
+              <span aria-hidden className="absolute -top-[3px] -right-[3px] size-2 rounded-[2px] bg-brand ring-2 ring-sidebar" />
             </div>
-            <span className="text-heading font-bold text-text-primary tracking-tight truncate">SystemDNA</span>
+            <span className="text-[15px] font-semibold text-text-primary tracking-[-0.02em] truncate">
+              System<span className="text-text-tertiary font-medium">DNA</span>
+            </span>
           </Link>
         ) : null}
         <button
@@ -107,7 +110,7 @@ export default function Sidebar() {
         </button>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto overflow-x-hidden">
+      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto overflow-x-hidden">
         {NAV.map((item, idx) => {
           if (item.divider) return <hr key={`d-${idx}`} className="border-divider my-4 mx-1" />;
           const Icon = item.icon!;
@@ -119,15 +122,15 @@ export default function Sidebar() {
           }, -1);
           const active = Boolean(item.href && isActivePath(pathname, item.href)) || activeChildIndex >= 0;
           const base = cn(
-            "flex items-center w-full rounded-lg text-body font-medium transition-all duration-150 group",
-            collapsed ? "justify-center p-2.5" : "px-3 py-2 gap-3",
+            "relative flex items-center w-full h-9 rounded-md text-body font-medium transition-colors duration-150 group",
+            collapsed ? "justify-center px-2.5" : "px-3 gap-3",
           );
           const tone = active
-            ? "bg-text-primary text-text-inverse hover:bg-text-primary"
-            : "text-text-primary hover:bg-surface-hover";
+            ? "bg-surface-hover text-text-primary before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:rounded-full before:bg-brand"
+            : "text-text-secondary hover:text-text-primary hover:bg-surface-hover/70";
           const iconClass = cn(
-            "w-5 h-5 shrink-0 transition-colors",
-            active ? "text-text-inverse" : "text-icon-secondary group-hover:text-icon-primary",
+            "size-[18px] shrink-0 transition-colors",
+            active ? "text-brand-text" : "text-icon-secondary group-hover:text-icon-primary",
           );
 
           if (item.children) {
@@ -152,7 +155,7 @@ export default function Sidebar() {
                         className={cn(
                           "h-8 flex items-center pl-[32px] text-body rounded-md transition-colors duration-150",
                           i === activeChildIndex
-                            ? "text-text-primary font-semibold"
+                            ? "text-text-primary font-medium"
                             : "text-text-secondary hover:text-text-primary hover:bg-surface-hover/50",
                         )}
                       >
@@ -194,14 +197,14 @@ export default function Sidebar() {
               onClick={() => setDarkMode(!isDark)}
               className={cn(
                 "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-focus-ring focus:ring-offset-1",
-                isDark ? "bg-primary" : "bg-border-strong",
+                isDark ? "bg-brand" : "bg-border-strong",
               )}
               aria-label="Toggle dark mode"
             >
               <span
                 className={cn(
                   "pointer-events-none inline-block h-4 w-4 transform rounded-full shadow-xs transition duration-200 ease-in-out",
-                  isDark ? "translate-x-4 bg-surface" : "translate-x-0 bg-icon-primary",
+                  isDark ? "translate-x-4 bg-brand-ink" : "translate-x-0 bg-surface",
                 )}
               />
             </button>

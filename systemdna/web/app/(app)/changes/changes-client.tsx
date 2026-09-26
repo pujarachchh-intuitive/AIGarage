@@ -58,7 +58,7 @@ export function ChangesClient() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="relative lg:col-span-2">
-          <Search className="size-4 text-zinc-400 absolute left-3 top-3" />
+          <Search className="size-4 text-icon-secondary absolute left-3 top-3" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -79,7 +79,7 @@ export function ChangesClient() {
               </option>
             ))}
           </select>
-          <ChevronDown className="size-4 text-zinc-400 absolute right-3 top-3 pointer-events-none" />
+          <ChevronDown className="size-4 text-icon-secondary absolute right-3 top-3 pointer-events-none" />
         </div>
       </div>
 

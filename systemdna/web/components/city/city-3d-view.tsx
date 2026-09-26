@@ -16,6 +16,19 @@ const LANDMARK_INFO = {
   hotspot: { label: "Hotspot", body: "Unusually large. Often where complexity hides.", swatch: "bg-warning" },
 } as const;
 
+// The building vocabulary, in the order a request travels through a system.
+const FORMS = [
+  { id: "storage", glyph: "◯", name: "Vault", body: "Storage: tables, columns, datasets." },
+  { id: "transform", glyph: "☰", name: "Terraces", body: "Transforms: SQL models and jobs that refine data." },
+  { id: "logic", glyph: "▯", name: "Tower", body: "Logic: modules, functions, models. Ribbon windows." },
+  { id: "contract", glyph: "⬡", name: "Prism", body: "Contracts: types, schemas, fields." },
+  { id: "interface", glyph: "◎", name: "Broadcast", body: "Endpoints. The ring on top is the API it serves." },
+  { id: "ui", glyph: "◻", name: "Pavilion", body: "UI: components and pages, in glass." },
+  { id: "insight", glyph: "◩", name: "Observatory", body: "Dashboards, with a lit display on the roof." },
+  { id: "business", glyph: "◠", name: "Dome", body: "Business processes." },
+  { id: "quality", glyph: "▭", name: "Annex", body: "Tests and docs: low, under a thin roof." },
+] as const;
+
 // Language bar uses zinc shades, like every chart in the design system.
 const LANG_SHADES = ["var(--pie-1)", "var(--pie-3)", "var(--pie-5)", "var(--pie-6)", "var(--pie-4)", "var(--pie-2)"];
 
@@ -89,17 +102,56 @@ export function City3DView({
           <Section title="Reading the map">
             {[
               ["Height", prefs.height === "lines" ? "Lines of code, on a log scale." : "How many files import it, on a log scale."],
-              prefs.style === "realistic"
-                ? ["Buildings", "Glass towers are the biggest files, offices the middle, brick the smallest. Docs are brick."]
-                : ["Colour", colorMode === "zinc" ? "One zinc shade per top-level folder." : "The top-level folder a file lives in."],
-              prefs.style === "realistic" ? ["Blocks", "One city block per top-level folder, with streets between them."] : ["Plate", "One district, sized to the files it holds."],
-              ["Arcs", "Local imports. Pick a file to see what it uses and what uses it."],
+              ["Footprint", "How many components live in the file."],
+              ["Plates", "One per top-level folder, engraved with its name."],
             ].map(([k, v]) => (
               <div key={k} className="flex flex-col">
                 <span className="text-body font-semibold text-text-primary">{k}</span>
                 <span className="type-caption">{v}</span>
               </div>
             ))}
+          </Section>
+
+          <Section title="Forms">
+            <p className="type-caption -mt-1">What a file holds decides its shape.</p>
+            {FORMS.filter((f) => data.files.some((x) => x.archetype === f.id)).map((f) => (
+              <div key={f.id} className="flex items-start gap-2.5">
+                <span className="font-mono text-[10px] leading-5 w-[18px] shrink-0 text-center text-text-tertiary" aria-hidden="true">{f.glyph}</span>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-body font-semibold text-text-primary">
+                    {f.name} <span className="type-caption">{data.files.filter((x) => x.archetype === f.id).length}</span>
+                  </span>
+                  <span className="type-caption">{f.body}</span>
+                </div>
+              </div>
+            ))}
+          </Section>
+
+          <Section title="Marks">
+            {[
+              ["Hatching", "Untested components. The hatch covers the untested share of the height."],
+              ["Gold ring", "Holds personal data."],
+              ["Acid light", "High criticality."],
+              ["Acid dashes", "A dependency Bob found that the parser missed."],
+              ["Floor traces", "Dependencies, from a file to the files that use it."],
+            ].map(([k, v]) => (
+              <div key={k} className="flex flex-col">
+                <span className="text-body font-semibold text-text-primary">{k}</span>
+                <span className="type-caption">{v}</span>
+              </div>
+            ))}
+            {data.layers.length > 0 ? (
+              <div className="flex flex-col gap-1.5 pt-1">
+                <span className="text-body font-semibold text-text-primary">Layer outline</span>
+                <span className="type-caption -mt-1">The thin line around each footprint.</span>
+                {data.layers.map((l) => (
+                  <span key={l.id} className="flex items-center gap-2 type-caption">
+                    <span className="size-2.5 rounded-[3px] shrink-0" style={{ background: l.accent }} />
+                    {l.label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-surface-secondary border border-border">
               {(["zinc", "folder"] as const).map((m) => (
                 <button
@@ -110,7 +162,7 @@ export function City3DView({
                     colorMode === m ? "bg-surface text-text-primary shadow-2xs border border-border" : "text-text-tertiary hover:text-text-primary",
                   )}
                 >
-                  {m === "zinc" ? "Zinc" : "By folder"}
+                  {m === "zinc" ? "Natural" : "By folder"}
                 </button>
               ))}
             </div>

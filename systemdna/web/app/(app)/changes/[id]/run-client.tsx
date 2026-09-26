@@ -113,7 +113,7 @@ export function RunClient({ id }: { id: string }) {
   if (!hydrated || !graph || wrongRepo) {
     return (
       <PageShell>
-        <div className="h-[600px] rounded-xl bg-zinc-50 animate-pulse" />
+        <div className="h-[600px] rounded-xl bg-surface-secondary animate-pulse" />
       </PageShell>
     );
   }
@@ -174,7 +174,7 @@ export function RunClient({ id }: { id: string }) {
       />
 
       {change.mode === "demo" ? (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-zinc-50/50">
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-surface-secondary">
           <Info className="size-4 text-icon-secondary mt-0.5 shrink-0" />
           <p className="text-body text-text-secondary">
             <span className="font-semibold text-text-primary">Simulated run.</span> No backend is connected, so these

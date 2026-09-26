@@ -156,7 +156,7 @@ export function NewChangeClient() {
                     </optgroup>
                   ))}
                 </select>
-                <ChevronDown className="size-4 text-zinc-400 absolute right-3 top-3 pointer-events-none" />
+                <ChevronDown className="size-4 text-icon-secondary absolute right-3 top-3 pointer-events-none" />
               </div>
               {node ? <span className="type-caption">{node.line ? `${node.file}:${node.line}` : node.file}</span> : null}
             </label>
@@ -222,7 +222,7 @@ export function NewChangeClient() {
               className="h-[460px]"
             />
           ) : (
-            <div className="h-[460px] rounded-xl bg-zinc-50 animate-pulse" />
+            <div className="h-[460px] rounded-xl bg-surface-secondary animate-pulse" />
           )}
           <CityLegend />
         </div>
