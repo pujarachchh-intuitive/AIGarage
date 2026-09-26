@@ -1,4 +1,25 @@
-# IBM Hackathon GitHub Project Template
+# SystemDNA
+
+SystemDNA scans a code repository into a cross-layer knowledge graph and predicts what one change, such as renaming a database column, will break across every layer. It then shows parallel IBM Bob agents fixing each affected part live in a 3D "Agent City".
+
+## Frontend (web/)
+
+React 18 + Vite + TypeScript + Tailwind, with React Three Fiber for the 3D City and Synapse views. The UI is built against a mock data layer that matches the PRD contracts. `VITE_DATA_MODE=mock|live` switches between the mock data and the real backend.
+
+```bash
+cd web
+npm install
+cp .env.example .env   # VITE_DATA_MODE=mock; no tokens
+npm run dev            # dev server
+npx vitest run         # tests
+npm run build          # static build to web/dist
+```
+
+Bob session exports and consumption screenshots are in [bob_sessions/](bob_sessions/README.md).
+
+---
+
+## Hackathon template: security setup
 
 This GitHub project template is for IBM Hackathon projects. It includes pre-configured security files to help prevent accidental credential commits and potential account suspension during the hackathon.
 
