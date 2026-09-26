@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Canvas } from "@react-three/fiber";
 import { registerSnapshot } from "@/lib/city-export";
-import { Maximize2, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { LocateFixed, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { CityData } from "@/lib/city";
 import { useIsDark } from "@/lib/theme";
@@ -169,7 +169,7 @@ export function City3D({
           <Minus className="size-4" />
         </button>
         <button className={iconBtn} onClick={() => api.current?.fit()} aria-label="Fit to screen" title="Fit (0)">
-          <Maximize2 className="size-4" />
+          <LocateFixed className="size-4" />
         </button>
         <button className={iconBtn} onClick={() => api.current?.rotate(-45)} aria-label="Rotate left" title="Rotate left ([)">
           <RotateCcw className="size-4" />

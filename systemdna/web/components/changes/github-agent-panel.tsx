@@ -1,15 +1,56 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ExternalLink, Eye, GitPullRequest, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink, GitPullRequest, Loader2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, primaryButton, secondaryButton } from "@/components/ui/page";
-import { DEMO_REPOS, fetchGithubStatus, runGithubAgent } from "@/lib/api";
+import { fetchBobStatus, fetchGithubStatus, openPullRequestFromPatch } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { realRunTarget } from "@/lib/real-run";
 import { useApp } from "@/lib/store";
-import type { AgentEvent, Change, Graph } from "@/lib/types";
+import type { BobReview, BobStatus, Change, GithubStatus, Graph } from "@/lib/types";
 
-type Preview = Extract<AgentEvent, { type: "preview" }>;
+/** The Bob Inspector's review as a PR description section. */
+function reviewMarkdown(review: BobReview | undefined) {
+  if (!review || review.status !== "done") return "";
+  const lines = [
+    "## IBM Bob Inspector review",
+    "",
+    `**Verdict:** ${review.verdict === "approved" ? "Approved" : "Changes requested"}`,
+    "",
+    review.summary,
+  ];
+  if (review.issues.length) {
+    lines.push("", ...review.issues.map((i) => `- \`${i.file}${i.line ? `:${i.line}` : ""}\` ${i.message}`));
+  }
+  return `\n\n${lines.join("\n")}`;
+}
+
+function ReviewView({ review }: { review: BobReview }) {
+  if (review.status === "skipped") {
+    return <p className="type-caption">IBM Bob Inspector skipped: {review.reason}</p>;
+  }
+  const approved = review.verdict === "approved";
+  return (
+    <div className={cn("flex flex-col gap-2 px-4 py-3 rounded-xl border", approved ? "border-border" : "border-amber-200/50 bg-amber-50")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-body font-semibold text-text-primary">IBM Bob Inspector</span>
+        <Badge variant={approved ? "success" : "warning"}>{approved ? "Approved" : "Changes requested"}</Badge>
+        {review.bobcoins !== undefined ? <Badge variant="neutral">{review.bobcoins.toFixed(2)} Bobcoins</Badge> : null}
+      </div>
+      {review.summary ? <p className="text-body text-text-secondary">{review.summary}</p> : null}
+      {review.issues.map((i, k) => (
+        <span key={k} className="type-caption">
+          <span className="font-semibold">
+            {i.file}
+            {i.line ? `:${i.line}` : ""}
+          </span>{" "}
+          {i.message}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function DiffView({ diff }: { diff: string }) {
   // Split per file so each can be opened on its own.
@@ -43,148 +84,179 @@ function DiffView({ diff }: { diff: string }) {
   );
 }
 
+/**
+ * The result of the change's real run, and the step that ships it: a draft pull
+ * request opened from the exact diff shown here (no agent runs again).
+ */
 export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Change; graph: Graph; reportMarkdown: () => string }) {
   const repos = useApp((s) => s.repos);
   const setPullRequest = useApp((s) => s.setPullRequest);
-  const [status, setStatus] = useState<{ configured: boolean; login?: string; error?: string } | null>(null);
-  const [busy, setBusy] = useState<"preview" | "pr" | null>(null);
+  const [status, setStatus] = useState<GithubStatus | null>(null);
+  const [bob, setBob] = useState<BobStatus | null>(null);
+  const [busy, setBusy] = useState(false);
   const [steps, setSteps] = useState<string[]>([]);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [error, setError] = useState<{ message: string; newErrors?: { file: string; line: number; message: string }[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
-    void fetchGithubStatus().then(setStatus);
+    void fetchBobStatus().then(setBob);
   }, []);
 
-  // Which real repo does this change belong to?
-  const target = useMemo(() => {
-    const connected = repos.find((r) => r.name === change.repo && r.source === "git" && r.url);
-    if (connected) return { url: connected.url!, ref: connected.ref };
-    const sample = DEMO_REPOS.find((r) => r.graph.repo === change.repo && r.gitUrl);
-    return sample ? { url: sample.gitUrl!, ref: undefined } : null;
-  }, [repos, change.repo]);
+  const target = useMemo(() => realRunTarget(change, graph, repos), [change, graph, repos]);
 
-  const node = graph.nodes.find((n) => n.id === change.request.node);
-  const renameable = change.request.change === "rename" && node?.type === "TSField";
-  const onGithub = target?.url.startsWith("https://github.com/");
-  const blocked = !target
-    ? "Connect this repository from a Git URL (Repositories page) so the agent can reach its code."
-    : !onGithub
-      ? "The agent opens pull requests on github.com repositories today."
-      : !renameable
-        ? "The agent handles renames of TypeScript fields today. This change is analysis only."
-        : null;
+  // GitHub status for this repo. Asked again when the user comes back from installing the app.
+  const targetUrl = target?.url;
+  useEffect(() => {
+    const load = () => void fetchGithubStatus(targetUrl).then(setStatus);
+    load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [targetUrl]);
 
-  // Find the connected repo id (for graph enrichment).
-  const targetRepoId = useMemo(() => {
-    return repos.find((r) => r.name === change.repo && r.source === "git" && r.url)?.id;
-  }, [repos, change.repo]);
+  // Can the server push to this repo right now?
+  const canPush = status?.mode === "app" ? Boolean(status.installed) && !status.error : Boolean(status?.login);
+  const needsInstall = status?.mode === "app" && !status.error && status.installed === false;
+  const run = change.run;
+  const pr = change.pullRequest;
+  const repoLabel = target?.url.replace("https://github.com/", "");
 
-  const run = async (dryRun: boolean) => {
-    if (!target || !node) return;
-    setBusy(dryRun ? "preview" : "pr");
+  const openPr = async () => {
+    if (!run?.patchId) return;
+    setBusy(true);
     setError(null);
     setSteps([]);
-    if (dryRun) setPreview(null);
-    await runGithubAgent(
+    await openPullRequestFromPatch(
       {
-        url: target.url,
-        ref: target.ref,
-        field: node.name,
-        to: change.request.to,
-        changeId: change.id,
-        title: `Rename ${node.name} to ${change.request.to}`,
-        body: `${reportMarkdown()}\n\n---\nOpened by the SystemDNA GitHub agent. Edits come from the TypeScript compiler's rename and were checked for new type errors.`,
-        dryRun,
-        repoId: targetRepoId,
+        patchId: run.patchId,
+        title: change.title,
+        body: `${reportMarkdown()}${reviewMarkdown(run.review)}\n\n---\nOpened by SystemDNA. Edits were made by ${run.strategy === "compiler" ? "the TypeScript compiler's rename" : "IBM Bob Fixer agents, one per file, each limited to its own file"} and type-checked${run.remainingErrors?.length ? ` (${run.remainingErrors.length} new type errors remain; see the report)` : " with no new type errors"}.`,
       },
       (e) => {
         if (e.type === "progress") setSteps((s) => [...s, e.detail]);
-        if (e.type === "preview") setPreview(e);
-        if (e.type === "error") setError({ message: e.message, newErrors: e.newErrors });
+        if (e.type === "error") setError(e.message);
         if (e.type === "done" && !e.dryRun) setPullRequest(change.id, e.pr);
       },
     );
-    setBusy(null);
+    setBusy(false);
     setConfirming(false);
   };
 
-  const pr = change.pullRequest;
+  const body = !target ? (
+    <p className="text-body text-text-secondary">
+      {change.mode !== "demo"
+        ? "The live backend runs this change."
+        : "This repository has no code SystemDNA can reach (a sample, a zip upload or a non-GitHub host), so the run above is simulated. Connect it from a github.com URL to run changes for real."}
+    </p>
+  ) : !run || run.status === "running" ? (
+    <p className="flex items-center gap-2 text-body text-text-secondary">
+      {run ? <Loader2 className="size-4 animate-spin" /> : null}
+      {run ? "The diff appears here when the run finishes." : "The run starts after the plan is approved."}
+    </p>
+  ) : run.status === "failed" && !run.patchId ? (
+    <p className="text-body text-text-secondary">No diff: the run did not finish. {run.error}</p>
+  ) : !run.patchId ? (
+    <p className="text-body text-text-secondary">The agents made no changes, so there is nothing to open a pull request for.</p>
+  ) : (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {run.remainingErrors?.length ? <Badge variant="warning">{run.remainingErrors.length} new type errors</Badge> : <Badge variant="success">No new type errors</Badge>}
+        <Badge variant="neutral">{run.files.length} files changed</Badge>
+        <Badge variant="neutral">{run.strategy === "compiler" ? "TypeScript compiler" : "IBM Bob Fixer agents"}</Badge>
+        {run.diffTruncated ? <Badge variant="warning">Diff shortened</Badge> : null}
+        <span className="flex-1" />
+        <button
+          className={primaryButton}
+          disabled={busy || !canPush || Boolean(pr)}
+          onClick={() => setConfirming(true)}
+          title={needsInstall ? "Install the GitHub App on this repo first" : !canPush ? "Connect GitHub on the server first" : undefined}
+        >
+          {busy ? <Loader2 className="animate-spin" /> : <GitPullRequest />}
+          Open draft pull request
+        </button>
+      </div>
+      {needsInstall && status?.app ? (
+        <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-border bg-zinc-50/80">
+          <span className="text-body text-text-secondary">
+            The <span className="font-semibold text-text-primary">{status.app.name}</span> app is not installed on this repo yet. Install it, pick this repo, then come back here.
+          </span>
+          <a href={status.app.installUrl} target="_blank" rel="noreferrer" className={cn(secondaryButton, "shrink-0")}>
+            <ExternalLink />
+            Install GitHub App
+          </a>
+        </div>
+      ) : null}
+      {status && !status.configured ? (
+        <p className="type-caption">
+          To open pull requests, set up the GitHub App (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH in web/.env.local) and restart. A personal GITHUB_TOKEN (Contents: write and Pull requests: write on this repo) also works as a fallback.
+        </p>
+      ) : status?.error ? (
+        <p className="type-caption text-error">{status.error}</p>
+      ) : null}
+      {confirming ? (
+        <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
+          <div className="flex flex-col gap-1">
+            <span className="text-body font-semibold text-amber-700">Push a new branch and open a draft PR on {repoLabel}?</span>
+            <span className="type-caption text-amber-700">
+              {run.files.length} files change, exactly as shown below. Nothing is merged; the default branch is not touched.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button className={secondaryButton} onClick={() => setConfirming(false)}>
+              <X />
+              Cancel
+            </button>
+            <button className={primaryButton} onClick={openPr}>
+              <Check />
+              Open draft PR
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {run.review ? <ReviewView review={run.review} /> : null}
+      {run.remainingErrors?.length ? (
+        <div className="flex flex-col gap-1 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
+          <span className="text-body font-semibold text-amber-700">New type errors left after the run</span>
+          {run.remainingErrors.slice(0, 8).map((e, i) => (
+            <span key={i} className="type-caption text-amber-700">
+              {e.file}:{e.line} {e.message}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <DiffView diff={run.diff} />
+    </div>
+  );
 
   return (
     <Card
-      title="GitHub agent"
-      subtitle="Makes this change in the real repo with the TypeScript compiler's rename, checks it, and opens a draft pull request."
+      title="Pull request"
+      subtitle={target ? `The real run's diff for ${repoLabel}. Open it as a draft pull request when it looks right.` : "Real runs need the repository's code on github.com."}
       actions={
-        status ? (
-          status.configured && status.login ? (
-            <Badge variant="success">GitHub: @{status.login}</Badge>
-          ) : status.configured ? (
-            <Badge variant="destructive">Token problem</Badge>
-          ) : (
-            <Badge variant="neutral">No GitHub token</Badge>
-          )
-        ) : null
+        <div className="flex items-center gap-2">
+          {bob ? (
+            <Badge variant={bob.ready ? "success" : "neutral"} title={bob.reason}>
+              {bob.ready ? "IBM Bob ready" : "IBM Bob off"}
+            </Badge>
+          ) : null}
+          {status ? (
+            status.error ? (
+              <Badge variant="destructive">{status.mode === "app" ? "GitHub App problem" : "Token problem"}</Badge>
+            ) : status.mode === "app" ? (
+              <Badge variant={status.installed === false ? "warning" : "success"}>
+                GitHub App: {status.app?.slug}
+                {status.installed === false ? " (not installed)" : ""}
+              </Badge>
+            ) : status.login ? (
+              <Badge variant="success">GitHub: @{status.login}</Badge>
+            ) : (
+              <Badge variant="neutral">Not connected to GitHub</Badge>
+            )
+          ) : null}
+        </div>
       }
     >
       <div className="flex flex-col gap-4">
-        {blocked ? (
-          <p className="text-body text-text-secondary">{blocked}</p>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-body text-text-secondary">
-                Target <span className="font-semibold text-text-primary">{target!.url.replace("https://github.com/", "")}</span>
-                {target!.ref ? ` · ${target!.ref}` : ""}
-              </span>
-              <span className="flex-1" />
-              <button className={secondaryButton} disabled={busy !== null} onClick={() => run(true)}>
-                {busy === "preview" ? <Loader2 className="animate-spin" /> : <Eye />}
-                Preview changes
-              </button>
-              <button
-                className={primaryButton}
-                disabled={busy !== null || !preview || !status?.login || Boolean(pr)}
-                onClick={() => setConfirming(true)}
-                title={!status?.login ? "Set GITHUB_TOKEN on the server first" : !preview ? "Preview the changes first" : undefined}
-              >
-                {busy === "pr" ? <Loader2 className="animate-spin" /> : <GitPullRequest />}
-                Open draft pull request
-              </button>
-            </div>
-
-            {!status?.configured ? (
-              <p className="type-caption">
-                To open pull requests, add GITHUB_TOKEN to web/.env.local (a fine-grained token with Contents: write and Pull requests: write on this repo) and restart. Preview works without it.
-              </p>
-            ) : status.error ? (
-              <p className="type-caption text-error">{status.error}</p>
-            ) : null}
-
-            {confirming ? (
-              <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
-                <div className="flex flex-col gap-1">
-                  <span className="text-body font-semibold text-amber-700">Push a new branch and open a draft PR on {target!.url.replace("https://github.com/", "")}?</span>
-                  <span className="type-caption text-amber-700">
-                    {preview?.files.length} code files and {preview?.docs.length} docs change. Nothing is merged; the default branch is not touched.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button className={secondaryButton} onClick={() => setConfirming(false)}>
-                    <X />
-                    Cancel
-                  </button>
-                  <button className={primaryButton} onClick={() => run(false)}>
-                    <Check />
-                    Open draft PR
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </>
-        )}
-
+        {body}
         {steps.length > 0 ? (
           <ol className="flex flex-col gap-1">
             {steps.map((s, i) => (
@@ -195,21 +267,12 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
             ))}
           </ol>
         ) : null}
-
         {error ? (
-          <div className="flex flex-col gap-2 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50">
-            <span className="flex items-center gap-2 text-body font-semibold text-red-700">
-              <AlertTriangle className="size-4" />
-              {error.message}
-            </span>
-            {error.newErrors?.slice(0, 6).map((e, i) => (
-              <span key={i} className="type-caption text-red-700">
-                {e.file}:{e.line} {e.message}
-              </span>
-            ))}
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50 text-body font-semibold text-red-700">
+            <AlertTriangle className="size-4" />
+            {error}
           </div>
         ) : null}
-
         {pr ? (
           <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-border">
             <div className="flex flex-col">
@@ -222,20 +285,6 @@ export function GithubAgentPanel({ change, graph, reportMarkdown }: { change: Ch
               <ExternalLink />
               View on GitHub
             </a>
-          </div>
-        ) : null}
-
-        {preview ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="success">No new type errors</Badge>
-              <Badge variant="neutral">{preview.locations} edits</Badge>
-              <Badge variant="neutral">{preview.files.length} code files</Badge>
-              <Badge variant="neutral">{preview.docs.length} docs</Badge>
-              {preview.stringKeys ? <Badge variant="info">{preview.stringKeys} string keys</Badge> : null}
-              {preview.diffTruncated ? <Badge variant="warning">Diff shortened</Badge> : null}
-            </div>
-            <DiffView diff={preview.diff} />
           </div>
         ) : null}
       </div>

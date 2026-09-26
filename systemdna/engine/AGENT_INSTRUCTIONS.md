@@ -13,7 +13,7 @@ Agent City dashboard. The frontend already exists at `systemdna/web/` and must
 
 **WatsonX API Key (use this for all IBM/WatsonX LLM calls):**
 ```
-WATSONX_API_KEY=bob_prod_bob-apikey_5VkXSMTgdVWMQWcKdFf5x3w7ERvDcBhps2qoLTJ5q9XDJGpJN29T21Xs3zjstR8i7NJqD2Nzg78uuW1ZZiwQNTs6_8TkqwVm69rk6JM5LrWHQ9Y9jAzKPrm2CNHGVEzfQpr5z
+WATSONX_API_KEY=<set WATSONX_API_KEY in your .env; never commit it>
 ```
 Store this in `.env` as `WATSONX_API_KEY`. Never commit it to git.
 

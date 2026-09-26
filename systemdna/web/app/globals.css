@@ -836,3 +836,58 @@ html {
 .model-tag-meta { font-size: 10px; color: #ff5a1f; text-transform: uppercase; letter-spacing: 0.08em; }
 .landing-root .model-tag { --surface: #f4f3f0; --border: rgba(17,18,20,0.14); --text-primary: #111214; }
 
+
+/* ---------------------------------------------------------------------------
+   AI working effects (New change: Analyse impact).
+   --------------------------------------------------------------------------- */
+
+/* A light sweep across a progress bar or button while the AI works. */
+@keyframes ai-sweep {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.ai-bar {
+  background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.55) 50%, transparent 100%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: ai-sweep 1.4s linear infinite;
+}
+.ai-working {
+  position: relative;
+  overflow: hidden;
+}
+.ai-working::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.28) 50%, transparent 80%);
+  background-size: 200% 100%;
+  animation: ai-sweep 1.6s linear infinite;
+  pointer-events: none;
+}
+
+/* A soft moving glow around the map while the AI scans it. */
+@keyframes ai-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--info), 0 0 18px -2px color-mix(in srgb, var(--info) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--info), 0 0 34px 2px color-mix(in srgb, var(--info) 30%, transparent);
+  }
+}
+.ai-glow {
+  animation: ai-glow 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-bar,
+  .ai-working::after,
+  .ai-glow {
+    animation: none;
+  }
+}

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FolderGit2, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { GithubConnection } from "@/components/repos/github-connection";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LocalTime } from "@/components/ui/local-time";
 import { PageHeader, PageShell, PrimaryLink } from "@/components/ui/page";
@@ -67,6 +68,8 @@ export function ReposClient() {
           </PrimaryLink>
         }
       />
+
+      <GithubConnection />
 
       {repos.length === 0 ? (
         <div className="border border-border rounded-xl">

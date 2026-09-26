@@ -13,7 +13,7 @@ import {
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
-import { Minus, Plus, Scan, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { Minus, Plus, LocateFixed, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { districtColor } from "@/components/city/city-3d";
 import { cn } from "@/lib/cn";
 import { canvasToPng, registerSnapshot } from "@/lib/city-export";
@@ -641,7 +641,7 @@ export function GraphView({
           <Minus className="size-4" />
         </button>
         <button className={iconBtn} onClick={() => fitRef.current()} aria-label="Fit to screen" title="Fit everything in view">
-          <Scan className="size-4" />
+          <LocateFixed className="size-4" />
         </button>
       </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Bot, Clock, Coins, Download, FileSearch, Info, Layers3, RotateCcw, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Bot, Clock, Coins, Download, FileSearch, Info, Layers3, Loader2, RotateCcw, ShieldCheck, Square } from "lucide-react";
 import { toast } from "sonner";
 import { CityLegend } from "@/components/city/city-legend";
 import { CityMap, type CityAgent } from "@/components/city/city-map";
@@ -12,11 +12,12 @@ import { KpiTile } from "@/components/ui/kpi-tile";
 import { PageHeader, PageShell, PrimaryLink, primaryButton, secondaryButton } from "@/components/ui/page";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { approveChange, DEMO_REPOS, subscribeEvents } from "@/lib/api";
+import { isRealRunning, realRunTarget, startRealRun, stopRealRun } from "@/lib/real-run";
 import { buildReport, downloadText } from "@/lib/report";
 import { deriveRun, formatDuration, type BuildingState, type RunStatus } from "@/lib/run-state";
 import { approveSimulation, isSimulating, startSimulation, stopSimulation } from "@/lib/simulator";
 import { useApp, useChange } from "@/lib/store";
-import type { Severity } from "@/lib/types";
+import type { ChangeRunResult, RunStrategy, Severity } from "@/lib/types";
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   planned: "Planned",
@@ -24,6 +25,48 @@ const STATUS_LABEL: Record<RunStatus, string> = {
   running: "Running",
   completed: "Completed",
 };
+
+const STRATEGY_LABEL: Record<RunStrategy, string> = {
+  compiler: "the TypeScript compiler's rename",
+  bob: "IBM Bob Fixer agents, one per file",
+};
+
+/** What the real run is doing, or how it ended. */
+function RealRunBanner({ run, interrupted, running }: { run: ChangeRunResult | undefined; interrupted: boolean; running: boolean }) {
+  if (interrupted) {
+    return (
+      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200/50 bg-amber-50">
+        <AlertTriangle className="size-4 text-amber-700 mt-0.5 shrink-0" />
+        <p className="text-body text-amber-700">
+          <span className="font-semibold">This run was interrupted</span> (the page was reloaded or closed while it ran). Use Run again to start it on a fresh clone.
+        </p>
+      </div>
+    );
+  }
+  if (run?.status === "failed" || (run?.error && run.status !== "running")) {
+    return (
+      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-red-200/50 bg-red-50">
+        <AlertTriangle className="size-4 text-red-700 mt-0.5 shrink-0" />
+        <p className="text-body text-red-700">
+          <span className="font-semibold">{run.status === "failed" ? "The run did not finish." : "The run stopped early."}</span> {run.error}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-zinc-50/50">
+      {running ? <Loader2 className="size-4 text-icon-secondary mt-0.5 shrink-0 animate-spin" /> : <Info className="size-4 text-icon-secondary mt-0.5 shrink-0" />}
+      <p className="text-body text-text-secondary">
+        <span className="font-semibold text-text-primary">Real run.</span>{" "}
+        {running
+          ? `${run?.step ?? "Starting"}${run?.strategy ? ` · ${STRATEGY_LABEL[run.strategy]}` : ""}. The change is made in a fresh clone of the repository; nothing is pushed.`
+          : run?.status === "done"
+            ? `Made by ${run.strategy ? STRATEGY_LABEL[run.strategy] : "the agents"} in a fresh clone, then type-checked and reviewed by the IBM Bob Inspector. Nothing is pushed until you open a pull request below.`
+            : "The change runs in a fresh clone of the repository with the TypeScript compiler or IBM Bob Fixer agents. Nothing is pushed."}
+      </p>
+    </div>
+  );
+}
 
 export function RunClient({ id }: { id: string }) {
   const hydrated = useApp((s) => s.hydrated);
@@ -33,6 +76,7 @@ export function RunClient({ id }: { id: string }) {
   const change = useChange(id);
   const repos = useApp((s) => s.repos);
   const setRepo = useApp((s) => s.setRepo);
+  const setRun = useApp((s) => s.setRun);
   const [now, setNow] = useState(() => Date.now());
 
   // A change belongs to one repo: show it against that repo's graph.
@@ -45,6 +89,18 @@ export function RunClient({ id }: { id: string }) {
 
   const completed = change?.events.some((e) => e.event === "change_completed") ?? false;
 
+  // Changes on a github.com repo run for real (compiler or IBM Bob agents in a
+  // fresh clone); samples without code run the simulator. A connected repo is
+  // only known once the repo list has loaded, so wait for it before deciding.
+  const decided = Boolean(
+    change && (!change.repo || DEMO_REPOS.some((r) => r.graph.repo === change.repo) || repos.some((r) => r.name === change.repo)),
+  );
+  const realTarget = useMemo(() => (change && graph ? realRunTarget(change, graph, repos) : null), [change, graph, repos]);
+  const isRealRun = Boolean(realTarget);
+  const run = change?.run;
+  // A run saved as "running" that this tab is not running was cut off (page reload).
+  const interrupted = Boolean(isRealRun && run?.status === "running" && change && !isRealRunning(change.id));
+
   // Simulator options come from the graph: check messages per layer and the owning type name.
   const simOpts = useMemo(() => {
     if (!graph || !change) return undefined;
@@ -56,12 +112,31 @@ export function RunClient({ id }: { id: string }) {
     };
   }, [graph, change?.request.node]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Demo mode: play the simulated run. It keeps going if you leave the page.
+  // Real run: files that need approval wait for it (the gate is part of the
+  // event list, like the simulator's), then the server run starts.
+  const beginReal = useCallback(() => {
+    if (!change || !graph || !realTarget) return;
+    const approvals = change.report.fixUnits.filter((u) => u.needsApproval);
+    const approved = change.events.some((e) => e.event === "approved");
+    if (approvals.length > 0 && !approved) {
+      if (!change.events.some((e) => e.event === "awaiting_approval")) {
+        for (const u of approvals) appendEvent({ ts: new Date().toISOString(), change_id: change.id, event: "awaiting_approval", node: u.id, file: u.file, detail: u.approvalReason });
+      }
+      return;
+    }
+    void startRealRun(change, graph, realTarget);
+  }, [change, graph, realTarget, appendEvent]);
+
+  // Start once: the real run for github.com repos, the simulator for samples.
   useEffect(() => {
-    if (!change || !simOpts || change.mode !== "demo" || completed || isSimulating(change.id)) return;
-    resetEvents(change.id);
-    startSimulation(change, appendEvent, simOpts);
-  }, [change, simOpts, completed, appendEvent, resetEvents]);
+    if (!change || !simOpts || completed || !decided || change.mode !== "demo") return;
+    if (realTarget) {
+      if (!isRealRunning(change.id) && !change.run && !change.events.some((e) => e.event === "awaiting_approval")) beginReal();
+    } else if (!isSimulating(change.id)) {
+      resetEvents(change.id);
+      startSimulation(change, appendEvent, simOpts);
+    }
+  }, [change, simOpts, completed, decided, realTarget, beginReal, appendEvent, resetEvents]);
 
   // Live mode: listen to the backend event feed for this change.
   useEffect(() => {
@@ -113,7 +188,7 @@ export function RunClient({ id }: { id: string }) {
   if (!hydrated || !graph || wrongRepo) {
     return (
       <PageShell>
-        <div className="h-[600px] rounded-xl bg-surface-secondary animate-pulse" />
+        <div className="h-[600px] rounded-xl bg-zinc-50 animate-pulse" />
       </PageShell>
     );
   }
@@ -132,13 +207,36 @@ export function RunClient({ id }: { id: string }) {
   }
 
   const done = view.agents.filter((a) => a.state === "done").length;
+  const realRunning = isRealRun && run?.status === "running" && isRealRunning(change.id);
+
   const replay = () => {
     stopSimulation(change.id);
     resetEvents(change.id);
     startSimulation({ ...change, events: [] }, appendEvent, simOpts);
   };
+  // A real run is paid work (Bobcoins), so running it again is an explicit choice.
+  const runAgain = () => {
+    stopRealRun(change.id);
+    resetEvents(change.id);
+    setRun(change.id, undefined);
+    // Approvals were given for this plan already; keep them.
+    for (const u of change.report.fixUnits.filter((x) => x.needsApproval)) {
+      appendEvent({ ts: new Date().toISOString(), change_id: change.id, event: "approved", node: u.id, file: u.file, detail: "Approved by you" });
+    }
+    void startRealRun({ ...change, events: [], run: undefined }, graph, realTarget!);
+  };
+  const stop = () => {
+    stopRealRun(change.id);
+    appendEvent({ ts: new Date().toISOString(), change_id: change.id, event: "change_completed", detail: "Stopped by you" });
+    setRun(change.id, { status: "failed", step: undefined, error: "Stopped by you. Files already fixed in the clone were discarded." });
+  };
   const approve = async () => {
-    if (change.mode === "demo") approveSimulation(change.id);
+    if (isRealRun) {
+      for (const p of view.pendingApprovals) {
+        appendEvent({ ts: new Date().toISOString(), change_id: change.id, event: "approved", node: p.unit, file: p.file, detail: "Approved by you" });
+      }
+      void startRealRun(change, graph, realTarget!);
+    } else if (change.mode === "demo") approveSimulation(change.id);
     else {
       try {
         await approveChange(change.id);
@@ -156,7 +254,19 @@ export function RunClient({ id }: { id: string }) {
         subtitle={`${change.id} · ${change.report.items.filter((i) => i.severity !== "safe").length} components affected · ${change.report.fixUnits.length} files · ${change.report.waveCount} waves`}
         actions={
           <>
-            {change.mode === "demo" ? (
+            {isRealRun ? (
+              realRunning ? (
+                <button className={secondaryButton} onClick={stop}>
+                  <Square />
+                  Stop
+                </button>
+              ) : run ? (
+                <button className={secondaryButton} onClick={runAgain} title="Runs the agents again on a fresh clone (uses Bobcoins)">
+                  <RotateCcw />
+                  Run again
+                </button>
+              ) : null
+            ) : change.mode === "demo" ? (
               <button className={secondaryButton} onClick={replay}>
                 <RotateCcw />
                 Replay
@@ -173,8 +283,8 @@ export function RunClient({ id }: { id: string }) {
         }
       />
 
-      {change.mode === "demo" ? (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-surface-secondary">
+      {change.mode === "demo" && !isRealRun ? (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-zinc-50/50">
           <Info className="size-4 text-icon-secondary mt-0.5 shrink-0" />
           <p className="text-body text-text-secondary">
             <span className="font-semibold text-text-primary">Simulated run.</span> No backend is connected, so these
@@ -183,6 +293,8 @@ export function RunClient({ id }: { id: string }) {
           </p>
         </div>
       ) : null}
+
+      {isRealRun ? <RealRunBanner run={run} interrupted={interrupted} running={realRunning} /> : null}
 
       <GithubAgentPanel change={change} graph={graph} reportMarkdown={() => buildReport(change, graph, view)} />
 

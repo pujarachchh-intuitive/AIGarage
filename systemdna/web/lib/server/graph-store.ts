@@ -46,7 +46,7 @@ export interface RepoDetail extends RepoEntry {
 // Storage paths (local)
 // ---------------------------------------------------------------------------
 
-const DATA_DIR = process.env.SYSTEMDNA_DATA_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), ".data");
+const DATA_DIR = process.env.SYSTEMDNA_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), ".data");
 const REPOS_DIR = path.join(DATA_DIR, "repos");
 const INDEX = path.join(REPOS_DIR, "index.json");
 

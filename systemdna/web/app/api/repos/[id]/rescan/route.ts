@@ -3,7 +3,10 @@ import { getRepo } from "@/lib/server/repo-store";
 
 export const dynamic = "force-dynamic";
 
-/** Pulls the latest code for a git repository and rebuilds its graph (same id). */
+/**
+ * Pulls the latest code for a git repository and rebuilds its graph (same id).
+ * Repos first connected with the IBM Bob Cartographer are enriched again.
+ */
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const found = await getRepo(id);
@@ -12,5 +15,6 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     return Response.json({ error: "Uploaded repositories cannot be re-scanned. Upload the zip again." }, { status: 400 });
   }
   const { url, ref } = found.entry;
-  return ndjsonStream((emit) => ingestGit(url!, ref, emit, id));
+  const bob = found.entry.stats.bobLinks !== undefined;
+  return ndjsonStream((emit) => ingestGit(url!, ref, emit, id, { bob }));
 }
