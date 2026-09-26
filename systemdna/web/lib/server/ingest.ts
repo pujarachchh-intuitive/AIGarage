@@ -47,7 +47,7 @@ function scannerPath() {
 }
 
 /** Runs a command without a shell. Rejects on non-zero exit or timeout. */
-function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs: number; onLine?: (line: string) => void; env?: Record<string, string> }) {
+export function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs: number; onLine?: (line: string) => void; onChunk?: (text: string) => void; env?: Record<string, string> }) {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, shell: false, windowsHide: true });
     let stderr = "";
@@ -57,6 +57,7 @@ function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs: numbe
       reject(new Error(`${path.basename(cmd)} took longer than ${Math.round(opts.timeoutMs / 1000)} seconds`));
     }, opts.timeoutMs);
     child.stdout.on("data", (d: Buffer) => {
+      opts.onChunk?.(d.toString());
       buffer += d.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
@@ -151,7 +152,7 @@ async function scanAndSave(dir: string, meta: Omit<RepoEntry, "id" | "scannedAt"
   return entry;
 }
 
-async function withWorkspace<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+export async function withWorkspace<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   if (running >= LIMITS.concurrent) throw new Error("Two repositories are already being scanned. Try again in a minute.");
   running += 1;
   const base = await fs.mkdtemp(path.join(os.tmpdir(), "systemdna-"));

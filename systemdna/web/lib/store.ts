@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { DATA_MODE, DEMO_REPOS, fetchGraph, listConnectedRepos } from "@/lib/api";
-import type { Change, ConnectedRepo, Graph, RunEvent } from "@/lib/types";
+import type { Change, ConnectedRepo, Graph, PullRequestRef, RunEvent } from "@/lib/types";
 
 interface AppState {
   graph: Graph | null;
@@ -21,6 +21,7 @@ interface AppState {
   addChange: (change: Change) => void;
   appendEvent: (ev: RunEvent) => void;
   resetEvents: (changeId: string) => void;
+  setPullRequest: (changeId: string, pr: PullRequestRef) => void;
   resetDemo: () => void;
   nextChangeId: () => string;
 }
@@ -64,6 +65,8 @@ export const useApp = create<AppState>()(
         set((s) => ({
           changes: s.changes.map((c) => (c.id === changeId ? { ...c, events: [] } : c)),
         })),
+      setPullRequest: (changeId, pr) =>
+        set((s) => ({ changes: s.changes.map((c) => (c.id === changeId ? { ...c, pullRequest: pr } : c)) })),
       resetDemo: () => set({ changes: [] }),
       nextChangeId: () => {
         const max = get().changes.reduce((m, c) => {

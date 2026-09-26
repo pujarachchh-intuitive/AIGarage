@@ -208,10 +208,19 @@ export interface RunEvent {
 
 export type DataMode = "demo" | "live";
 
+export interface PullRequestRef {
+  url: string;
+  number: number;
+  branch: string;
+  base: string;
+}
+
 export interface Change {
   id: string;
   /** Graph.repo this change belongs to. */
   repo?: string;
+  /** A real pull request opened by the GitHub agent. */
+  pullRequest?: PullRequestRef;
   title: string;
   request: ChangeRequest;
   report: ImpactReport;
@@ -249,3 +258,11 @@ export type IngestEvent =
   | { type: "progress"; step: string; detail: string; ms?: number }
   | { type: "done"; repo: ConnectedRepo }
   | { type: "error"; message: string };
+
+/** One line of the GitHub agent stream. */
+export type AgentEvent =
+  | { type: "progress"; step: string; detail: string }
+  | { type: "preview"; files: { file: string; count: number }[]; docs: { file: string; count: number }[]; locations: number; stringKeys: number; diff: string; diffTruncated: boolean }
+  | { type: "done"; dryRun: true }
+  | { type: "done"; dryRun: false; pr: PullRequestRef }
+  | { type: "error"; message: string; newErrors?: { file: string; line: number; message: string }[] };
