@@ -26,6 +26,58 @@ NEXT_PUBLIC_API_URL=https://api.example.com
 
 Never put the demo write token in an env file: every `NEXT_PUBLIC_*` value is baked into the public JavaScript. Type the token into **Settings → Demo write token** instead. It is kept in the browser tab's `sessionStorage` only.
 
+## Connect your own repository
+
+Open **Repositories**, then **Connect repository** (or pick "+ Connect a repository…" in the top-bar switch).
+
+| Source | How |
+| --- | --- |
+| Git URL | A public `https://` URL on GitHub, GitLab or Bitbucket, plus an optional branch |
+| Upload | A `.zip` of the repo, up to 50 MB (GitHub: Code, then Download ZIP) |
+
+What happens (the page shows each step live):
+
+1. **Get the code.** `git clone --depth 1` (no shell, 2-minute limit, no prompts) or unzip (paths that escape the folder are refused).
+2. **Check size.** Up to 40,000 files and 300 MB.
+3. **Scan.** `core/scanner/ts-scan.mjs --progress` runs in its own process (4-minute limit). It only reads files: no install, no build, no scripts.
+4. **Save.** The graph goes to `web/.data/repos/<id>/graph.json` with an entry in `index.json` (git-ignored).
+5. **Clean up.** The temp copy of the code is always deleted.
+
+| Method and path | Does |
+| --- | --- |
+| `GET /api/repos` | List connected repos |
+| `POST /api/repos` | Connect: JSON `{ url, ref? }` or a multipart form with `file`. Streams progress as newline-delimited JSON |
+| `GET /api/repos/{id}` | The graph and its entry |
+| `POST /api/repos/{id}/rescan` | Pull the latest code and rebuild (git repos) |
+| `DELETE /api/repos/{id}` | Remove the repo and its graph |
+
+## GitHub agent
+
+On a change page, the **GitHub agent** panel makes the change in the real repo and opens a draft pull request.
+
+1. **Preview changes**: fresh clone, rename with the TypeScript compiler (`core/scanner/ts-rename.mjs`), rename `keyof` string keys and docs, then check that no file gains new type errors. Shows the diff. Nothing is pushed.
+2. **Open draft pull request** (after you confirm): new branch `systemdna/<change>-...`, one commit, push, draft PR with the impact report as its description. The default branch is never touched.
+
+| Method and path | Does |
+| --- | --- |
+| `GET /api/github/status` | Whether a token is set, and whose (never returns the token) |
+| `POST /api/github/pull-requests` | `{ url, field, to, changeId, title, body, dryRun }`. Streams progress, then the diff, then the PR |
+
+Needs `GITHUB_TOKEN` in `.env.local` (a fine-grained token with Contents and Pull requests write access). Renames of TypeScript fields only, today.
+
+## Settings
+
+Copy `.env.example` to `.env.local`.
+
+| Variable | Default | Use |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | empty | FastAPI backend (live mode) |
+| `SYSTEMDNA_DATA_DIR` | `web/.data` | Where graphs are stored |
+| `SYSTEMDNA_SCANNER` | `../core/scanner/ts-scan.mjs` | Scanner path (run `npm install` there once) |
+| `GITHUB_TOKEN` | empty | Lets the GitHub agent push branches and open draft PRs |
+
+The server also needs `git` installed.
+
 ## Demo repos
 
 Pick one with the Repository switch in the top bar.
@@ -33,7 +85,6 @@ Pick one with the Repository switch in the top bar.
 | Repo | Where the graph comes from | Demo change |
 | --- | --- | --- |
 | `marketplace-dashboard` (default) | Real. Built by `core/scanner/ts-scan.mjs` from [krishil-agrawal-itp/marketplace-dashboard](https://github.com/krishil-agrawal-itp/marketplace-dashboard), cloned in `samples/marketplace-dashboard`. Saved as `lib/mock/marketplace-dashboard.graph.json` | Rename `Deployment.successRate` to `deploySuccessRate`: 6 files in 2 waves. Grep flags 2 extra files that use a different `ProductRow.successRate` |
-| `samples/shopflow` | Hand-made in `lib/mock/shopflow.ts` to match the PRD's 7-layer sample (SQL, PySpark, API, React) | Rename `orders.cust_id` to `customer_id`: 18 files in 7 waves. Grep misses the 2 files that feed Finance |
 
 To re-scan the sample repo after it changes (run `npm install` in `../core/scanner` once first):
 
@@ -46,7 +97,9 @@ npm run scan:sample
 | Route | What it shows |
 | --- | --- |
 | `/overview` | KPIs, components per district, how links were found, recent changes, agent activity |
-| `/city` | The Agent City map. Click a building to see what it depends on and what uses it |
+| `/repos` | Connected repositories and samples; `/repos/new` connects a new one |
+| `/city` | The Agent City. Three views: **Dependency map** (the knowledge graph as districts and roads) and **3D city** (`?view=3d`: one building per file, height = lines of code on a log scale, plates = top-level folders, arcs = imports, caps = entry point, core modules and hotspots) and **Graph** (`?view=graph`: an Obsidian-style force graph of every node, sized by link count, with search, filters, display and force settings) |
+| | Agent City toolbar: **Full screen** (whole view with its panels; falls back to filling the window where the browser blocks full screen), **Image** (PNG of the current view), **Preferences** (saved in the browser: start view, map legend, 3D height by lines or imports, colour, arcs, labels, auto-rotate, graph local depth), **Keyboard shortcuts** (`1` `2` `3` views, `F` full screen, `Esc` clear, `?` help). The selection carries across all three views |
 | `/changes/new` | Pick a column or field, give it a new name, see the ripple, the fix plan, business impact and the grep comparison |
 | `/changes/[id]` | The live run: approval gate, agents on the map, trace, agents table, governance, graph diff, report download |
 | `/changes` | All changes |
@@ -73,5 +126,5 @@ components/ui/        badge, status badge, table, KPI tile, page shell, empty st
 components/city/      city map (Cytoscape), legend, node panel
 components/changes/   impact report parts, run panels
 lib/                  types, impact engine, run state, simulator, API client, store, theme, report
-lib/mock/             ShopFlow demo graph
+lib/mock/             marketplace-dashboard demo graph
 ```

@@ -3,21 +3,25 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { DATA_MODE, DEMO_REPOS, fetchGraph } from "@/lib/api";
-import type { Change, Graph, RunEvent } from "@/lib/types";
+import { DATA_MODE, DEMO_REPOS, fetchGraph, listConnectedRepos } from "@/lib/api";
+import type { Change, ConnectedRepo, Graph, PullRequestRef, RunEvent } from "@/lib/types";
 
 interface AppState {
   graph: Graph | null;
   graphError: string | null;
   changes: Change[];
   hydrated: boolean;
-  /** Demo repo id (demo mode only). */
+  /** The repo on screen: a sample id or a connected repo id. */
   repoId: string;
   setRepo: (id: string) => Promise<void>;
+  /** Repositories the user connected. */
+  repos: ConnectedRepo[];
+  loadRepos: () => Promise<void>;
   loadGraph: () => Promise<void>;
   addChange: (change: Change) => void;
   appendEvent: (ev: RunEvent) => void;
   resetEvents: (changeId: string) => void;
+  setPullRequest: (changeId: string, pr: PullRequestRef) => void;
   resetDemo: () => void;
   nextChangeId: () => string;
 }
@@ -33,6 +37,14 @@ export const useApp = create<AppState>()(
       setRepo: async (id) => {
         set({ repoId: id, graph: null });
         await get().loadGraph();
+      },
+      repos: [],
+      loadRepos: async () => {
+        try {
+          set({ repos: await listConnectedRepos() });
+        } catch {
+          set({ repos: [] });
+        }
       },
       loadGraph: async () => {
         if (get().graph) return;
@@ -53,6 +65,8 @@ export const useApp = create<AppState>()(
         set((s) => ({
           changes: s.changes.map((c) => (c.id === changeId ? { ...c, events: [] } : c)),
         })),
+      setPullRequest: (changeId, pr) =>
+        set((s) => ({ changes: s.changes.map((c) => (c.id === changeId ? { ...c, pullRequest: pr } : c)) })),
       resetDemo: () => set({ changes: [] }),
       nextChangeId: () => {
         const max = get().changes.reduce((m, c) => {
@@ -67,17 +81,21 @@ export const useApp = create<AppState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({ changes: s.changes, repoId: s.repoId }),
       skipHydration: true,
-      onRehydrateStorage: () => () => useApp.setState({ hydrated: true }),
+      onRehydrateStorage: () => () => {
+        // The ShopFlow sample was removed. Move anyone still on it to the default sample.
+        const { repoId } = useApp.getState();
+        useApp.setState({ hydrated: true, ...(repoId === "shopflow" ? { repoId: DEMO_REPOS[0].id, graph: null } : {}) });
+      },
     },
   ),
 );
 
-/** Changes that belong to the repo on screen. Older saved changes had no repo: they are ShopFlow's. */
+/** Changes that belong to the repo on screen. Older saved changes with no repo are hidden. */
 export function useRepoChanges(): Change[] {
   const changes = useApp((s) => s.changes);
   const repo = useApp((s) => s.graph?.repo);
   return useMemo(
-    () => (repo ? changes.filter((c) => (c.repo ?? "samples/shopflow") === repo) : []),
+    () => (repo ? changes.filter((c) => c.repo === repo) : []),
     [changes, repo],
   );
 }

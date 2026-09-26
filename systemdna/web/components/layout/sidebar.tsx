@@ -4,6 +4,7 @@ import { useState, type ComponentType } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  FolderGit2,
   GitBranch,
   LayoutDashboard,
   Map as MapIcon,
@@ -55,6 +56,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, href: "/overview" },
+  { label: "Repositories", icon: FolderGit2, href: "/repos" },
   { label: "Agent City", icon: MapIcon, href: "/city" },
   {
     label: "Changes",

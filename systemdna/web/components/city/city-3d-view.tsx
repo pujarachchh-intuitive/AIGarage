@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, ChevronDown, X } from "lucide-react";
-import { City3D, districtColor, type CityColorMode } from "@/components/city/city-3d";
+import { City3D, districtColor } from "@/components/city/city-3d";
 import { Badge } from "@/components/ui/badge";
 import { buildCityData, type CityFile } from "@/lib/city";
+import { useCityPrefs } from "@/lib/city-prefs";
 import { cn } from "@/lib/cn";
 import { useIsDark } from "@/lib/theme";
 import type { Graph } from "@/lib/types";
@@ -49,18 +50,32 @@ function FileLink({ path, onSelect }: { path: string; onSelect: (p: string) => v
 export function City3DView({
   graph,
   onOpenNode,
+  initialPath,
+  onSelectPath,
   className,
 }: {
   graph: Graph;
   /** Opens a graph node in the 2D map. */
   onOpenNode?: (id: string) => void;
+  /** File to select on open (for example the file of the node picked in another view). */
+  initialPath?: string | null;
+  onSelectPath?: (path: string | null) => void;
   className?: string;
 }) {
   const data = useMemo(() => buildCityData(graph), [graph]);
   const isDark = useIsDark();
-  const [selected, setSelected] = useState<string | null>(null);
+  const prefs = useCityPrefs((s) => s.city3d);
+  const set3d = useCityPrefs((s) => s.set3d);
+  const colorMode = prefs.colorMode;
+  const setColorMode = (m: "zinc" | "folder") => set3d({ colorMode: m });
+  const [picked, setPicked] = useState<string | null | undefined>(undefined);
+  // Until the user clicks, follow the selection passed in from the other views.
+  const selected = picked === undefined ? (initialPath && data.files.some((f) => f.path === initialPath) ? initialPath : null) : picked;
+  const setSelected = (p: string | null) => {
+    setPicked(p);
+    onSelectPath?.(p);
+  };
   const [focusDir, setFocusDir] = useState<string | null>(null);
-  const [colorMode, setColorMode] = useState<CityColorMode>("zinc");
 
   const file: CityFile | undefined = selected ? data.files.find((f) => f.path === selected) : undefined;
   const fileNodes = file ? graph.nodes.filter((n) => n.file === file.path && !n.parent) : [];
@@ -73,9 +88,11 @@ export function City3DView({
         <aside className="w-[248px] shrink-0 border-r border-border overflow-y-auto scroll-thin">
           <Section title="Reading the map">
             {[
-              ["Height", "Lines of code, on a log scale."],
-              ["Colour", colorMode === "zinc" ? "One zinc shade per top-level folder." : "The top-level folder a file lives in."],
-              ["Plate", "One district, sized to the files it holds."],
+              ["Height", prefs.height === "lines" ? "Lines of code, on a log scale." : "How many files import it, on a log scale."],
+              prefs.style === "realistic"
+                ? ["Buildings", "Glass towers are the biggest files, offices the middle, brick the smallest. Docs are brick."]
+                : ["Colour", colorMode === "zinc" ? "One zinc shade per top-level folder." : "The top-level folder a file lives in."],
+              prefs.style === "realistic" ? ["Blocks", "One city block per top-level folder, with streets between them."] : ["Plate", "One district, sized to the files it holds."],
               ["Arcs", "Local imports. Pick a file to see what it uses and what uses it."],
             ].map(([k, v]) => (
               <div key={k} className="flex flex-col">
@@ -155,6 +172,13 @@ export function City3DView({
           onSelect={setSelected}
           focusDir={focusDir}
           colorMode={colorMode}
+          realistic={prefs.style === "realistic"}
+          time={prefs.time === "auto" ? (isDark ? "night" : "day") : prefs.time}
+          weather={prefs.weather}
+          heightMode={prefs.height}
+          arcs={prefs.arcs}
+          labels={prefs.labels}
+          autoRotate={prefs.autoRotate}
           className="flex-1 min-w-0"
         />
 

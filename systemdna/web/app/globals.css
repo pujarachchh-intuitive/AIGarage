@@ -681,3 +681,129 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
+
+/* ------------------------------------------------------------------
+ * Landing page motion. Every effect switches off for people who
+ * prefer reduced motion.
+ * ------------------------------------------------------------------ */
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Scroll reveal: children fade and lift in once they are on screen. */
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+.landing-reveal[data-shown] {
+  opacity: 1;
+  transform: none;
+}
+
+/* Hero words rise in on first load. */
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+.landing-rise {
+  animation: landing-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The line under the active dashboard tab: fills while the tab is on screen. */
+@keyframes landing-progress {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+.landing-progress {
+  animation: landing-progress 5.2s linear forwards;
+}
+
+/* A dashboard screen sliding in when its tab opens. */
+@keyframes landing-screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.landing-screen-in {
+  animation: landing-screen-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(2deg);
+  }
+}
+.landing-float {
+  animation: landing-float 6s ease-in-out infinite;
+}
+
+/* Rotate only: Tailwind's translate utilities position the element separately. */
+@keyframes landing-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+.landing-spin {
+  animation: landing-spin 18s linear infinite;
+}
+
+/* Feature cards: a soft light follows the pointer. */
+.landing-spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), color-mix(in oklab, var(--text-primary) 7%, transparent), transparent 60%);
+}
+.landing-spotlight:hover::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .landing-reveal,
+  .landing-rise,
+  .landing-screen-in {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    animation: none;
+    transition: none;
+  }
+  .landing-float,
+  .landing-spin,
+  .landing-progress {
+    animation: none;
+  }
+}

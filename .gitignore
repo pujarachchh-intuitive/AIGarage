@@ -1,20 +1,14 @@
+﻿# ============================================
+# AI ASSISTANT SESSION FILES
 # ============================================
-# WATSONX HACKATHON - SECURITY .GITIGNORE
-# ============================================
-# DO NOT REMOVE OR MODIFY SECURITY PATTERNS
-# ============================================
-
-# ============================================
-# AI ASSISTANT SESSION FILES (CRITICAL)
-# ============================================
-# NOTE: bob_sessions/ folder is REQUIRED for project submission
-# Live session files are excluded, but exported reports must be included
+# bob_sessions/ is REQUIRED for project submission — do NOT ignore it.
+# Live session files from other tools are excluded.
 .copilot/
 .cursor/
 .codeium/
 
 # ============================================
-# CREDENTIALS AND SECRETS (CRITICAL)
+# CREDENTIALS AND SECRETS
 # ============================================
 
 # Environment files
@@ -35,9 +29,6 @@ ibm-credentials.env
 *api_key*
 
 # Configuration files with credentials
-config.json
-config.yaml
-config.yml
 secrets.json
 secrets.yaml
 secrets.yml
@@ -67,62 +58,10 @@ database.json
 db-config.*
 
 # ============================================
-# DEVELOPMENT FILES
+# DEPENDENCIES
 # ============================================
 
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.npm
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-env/
-ENV/
-.venv
-
-# Java
-*.class
-*.jar
-*.war
-target/
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Build outputs
-dist/
-build/
-*.log
-
-# Backup files
-*.bak
-*.tmp
-*.temp
-*~
-.backup/
-
-# ============================================
-# DO NOT REMOVE ABOVE PATTERNS
-# Add project-specific patterns below
-# ============================================
-
-# ============================================
-# SystemDNA project patterns
-# ============================================
-# Dependencies (every package: web, scanner, and any added later)
+# Node.js (every package: web, scanner, and any added later)
 node_modules/
 .pnp
 .pnp.*
@@ -131,45 +70,71 @@ node_modules/
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+.npm
 
 # Python (backend, MCP server, orchestrator)
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
 .venv/
 venv/
+env/
+ENV/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Next.js build output
+# Java
+*.class
+*.jar
+*.war
+target/
+
+# ============================================
+# BUILD OUTPUTS
+# ============================================
+
 .next/
 out/
 build/
 dist/
 *.tsbuildinfo
 next-env.d.ts
-
-# Test output
 coverage/
 
-# Secrets and local settings. Never commit keys (see PRD: IBM disables leaked Bob accounts).
-.env
-.env.*
-!.env.example
-*.pem
-*.key
+# ============================================
+# INFRASTRUCTURE STATE
+# ============================================
 
-# Infrastructure state (CDK / Terraform)
 cdk.out/
 .terraform/
 *.tfstate
 *.tfstate.*
 *.tfplan
 
-# Local databases and event logs
+# ============================================
+# LOCAL DATA AND LOGS
+# ============================================
+
 *.sqlite
 *.sqlite3
 *.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.bak
+*.tmp
+*.temp
+*~
+.backup/
+
+# ============================================
+# PROJECT-SPECIFIC
+# ============================================
 
 # The sample repo is a separate git clone. Re-clone it with:
 #   git clone https://github.com/krishil-agrawal-itp/marketplace-dashboard.git systemdna/samples/marketplace-dashboard
@@ -179,19 +144,14 @@ systemdna/samples/marketplace-dashboard/
 # Claude Code local settings (launch.json stays tracked)
 .claude/settings.local.json
 
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# ============================================
+# EDITORS AND OS
+# ============================================
 
-# Editors and OS
 .vscode/*
 !.vscode/extensions.json
 .idea/
+*.swp
+*.swo
 .DS_Store
 Thumbs.db
-
-# Design-token source file (colours), not a secret; exempt from the *token* rule above
-!systemdna/web/lib/tokens.ts

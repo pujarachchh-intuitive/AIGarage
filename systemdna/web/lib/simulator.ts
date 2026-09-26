@@ -79,11 +79,8 @@ export function startSimulation(change: Change, emit: Emit, opts: SimOptions = {
 
   const { report } = change;
   const later = report.fixUnits.filter((u) => u.wave > 1 && !u.needsApproval && u.layer !== "quality");
-  // One agent tries to step outside its permit: the dynamic-SQL job in ShopFlow,
-  // otherwise the busiest code file after the first wave.
-  const blockedUnit =
-    report.fixUnits.find((u) => u.id.includes("export_job")) ??
-    [...later].sort((a, b) => b.nodes.length - a.nodes.length)[0];
+  // One agent tries to step outside its permit: the busiest code file after the first wave.
+  const blockedUnit = [...later].sort((a, b) => b.nodes.length - a.nodes.length)[0];
   // It reaches for a file grep would have changed, or another agent's file.
   const blockedTarget =
     report.grep.falsePositives.find((f) => !f.endsWith(".md")) ??

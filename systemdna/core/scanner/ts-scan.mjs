@@ -1,21 +1,26 @@
 // SystemDNA TypeScript scanner.
 //
-// Builds a graph.json (PRD section 7) for a TypeScript / Next.js repo.
+// Builds a graph.json (PRD section 7) for a TypeScript or JavaScript repo.
 // It uses the TypeScript language service, so links come from the compiler's
 // own "find references", not from text search. That is why it can tell two
 // different fields with the same name apart.
 //
 // Usage:
-//   node ts-scan.mjs <repo-dir> <out-file.json> [--repo-name name]
+//   node ts-scan.mjs <repo-dir> <out-file.json> [--repo-name name] [--progress] [--max-files 2500]
 //
-// Layers (districts on the city map):
-//   types       lib/types.ts                 shared type contracts
-//   data        data/**                      seed data
-//   logic       lib/** (not types.ts)        data layer functions and derived types
-//   components  components/**                React components
-//   pages       app/**/page.tsx, layout.tsx  routes
-//   business    README route table           what each page is used for
-//   quality     *.md docs                    docs that describe the types
+//   --progress   print one JSON line per step on stdout (used by the upload screen)
+//
+// It never runs code from the repo: no install, no build, no scripts. It only reads files.
+//
+// Layers (districts on the city map), found from common folder names:
+//   types       types.ts, types/, models/, entities/, schemas/   shared type contracts
+//   data        data/, seed, fixtures, mocks                      data files
+//   logic       lib/, utils/, services/, hooks/, and the rest     functions and derived types
+//   api         app/**/route.ts, api/, routes/, controllers/      request handlers
+//   components  components/, other .tsx files                     React components
+//   pages       app/**/page.tsx, layout.tsx, pages/**             routes
+//   business    README route table                               what each page is used for
+//   quality     tests and *.md docs                               tests and docs
 
 import fs from "node:fs";
 import path from "node:path";
@@ -27,20 +32,64 @@ if (!repoArg || !outArg) {
   process.exit(1);
 }
 const root = path.resolve(repoArg);
-const nameFlag = rest.indexOf("--repo-name");
-const repoName = nameFlag >= 0 ? rest[nameFlag + 1] : path.basename(root);
+const flag = (name) => rest.indexOf(name);
+const repoName = flag("--repo-name") >= 0 ? rest[flag("--repo-name") + 1] : path.basename(root);
+const showProgress = flag("--progress") >= 0;
+const maxFiles = flag("--max-files") >= 0 ? Number(rest[flag("--max-files") + 1]) : 2500;
 const rel = (f) => path.relative(root, f).split(path.sep).join("/");
+const started = Date.now();
+
+/** One JSON line per step, read by the upload screen. */
+function progress(step, detail, extra = {}) {
+  if (showProgress) process.stdout.write(JSON.stringify({ step, detail, ms: Date.now() - started, ...extra }) + "\n");
+}
+
+// Folders that never hold source we should read.
+const IGNORED_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "out", "coverage", ".turbo", ".vercel", "vendor", "target", "__pycache__", ".venv", "venv", ".cache", "storybook-static"]);
+
+function walk(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (IGNORED_DIRS.has(e.name) || e.isSymbolicLink()) continue;
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else out.push(p);
+  }
+  return out;
+}
+
+const CODE_EXT = /\.(tsx?|jsx?|mjs|cjs)$/;
+const isScannable = (r) =>
+  CODE_EXT.test(r) && !r.endsWith(".d.ts") && r !== "next-env.d.ts" && !r.split("/").some((part) => part.startsWith(".") || IGNORED_DIRS.has(part));
+
+progress("files", "Listing files");
+const allFiles = walk(root);
 
 // ---------------------------------------------------------------------------
-// Language service over the repo's own tsconfig.
+// Language service over the repo's own tsconfig (or sensible defaults).
 // ---------------------------------------------------------------------------
-const configPath = ts.findConfigFile(root, ts.sys.fileExists, "tsconfig.json");
-if (!configPath) throw new Error(`No tsconfig.json in ${root}`);
-const parsed = ts.parseJsonConfigFileContent(ts.readConfigFile(configPath, ts.sys.readFile).config, ts.sys, root);
-const files = parsed.fileNames.filter((f) => {
-  const r = rel(f);
-  return !r.startsWith("node_modules/") && !r.startsWith(".next/") && r !== "next-env.d.ts" && /^(app|components|lib|data)\//.test(r);
-});
+const configPath = ts.findConfigFile(root, ts.sys.fileExists, "tsconfig.json") ?? ts.findConfigFile(root, ts.sys.fileExists, "jsconfig.json");
+const insideRoot = configPath && !path.relative(root, configPath).startsWith("..");
+const parsed = insideRoot
+  ? ts.parseJsonConfigFileContent(ts.readConfigFile(configPath, ts.sys.readFile).config, ts.sys, path.dirname(configPath))
+  : {
+      options: {
+        allowJs: true,
+        jsx: ts.JsxEmit.Preserve,
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        baseUrl: root,
+        paths: { "@/*": ["./*", "./src/*"], "~/*": ["./*", "./src/*"] },
+      },
+      fileNames: [],
+    };
+parsed.options.allowJs = true;
+// Some tsconfigs include nothing (for example a root config with project references): fall back to every code file.
+let codeFiles = parsed.fileNames.filter((f) => isScannable(rel(f)));
+if (codeFiles.length === 0) codeFiles = allFiles.filter((f) => isScannable(rel(f)));
+const truncated = codeFiles.length > maxFiles;
+const files = codeFiles.sort().slice(0, maxFiles);
+progress("files", `${files.length} code files${truncated ? ` (capped at ${maxFiles})` : ""}, ${allFiles.length} files in total`, { codeFiles: files.length, totalFiles: allFiles.length, truncated });
 
 const host = {
   getScriptFileNames: () => files,
@@ -67,14 +116,24 @@ const edges = new Map();
 /** For each source file: list of { start, end, id } top-level ranges. */
 const ranges = new Map();
 
+/** Path without a leading src/ (many repos keep everything in src/). */
+const stripSrc = (r) => r.replace(/^src\//, "");
+
 function layerOf(r) {
-  if (r === "lib/types.ts") return "types";
-  if (r.startsWith("data/")) return "data";
-  if (r.startsWith("lib/")) return "logic";
-  if (r.startsWith("components/")) return "components";
-  if (r.startsWith("app/")) return "pages";
-  return "quality";
+  const p = stripSrc(r);
+  if (!CODE_EXT.test(p)) return "quality";
+  if (/(^|\/)(__tests__|tests?|e2e|cypress)\/|\.(test|spec)\.[jt]sx?$/.test(p)) return "quality";
+  if (/(^|\/)types?\.[jt]sx?$|(^|\/)(types|models|entities|schemas?)\//.test(p)) return "types";
+  if (/^app\/(.*\/)?route\.[jt]sx?$|^pages\/api\/|(^|\/)(api|routes|controllers|handlers)\//.test(p)) return "api";
+  if (/^app\/(.*\/)?(page|layout)\.[jt]sx?$|^pages\//.test(p)) return "pages";
+  if (/^(data|seeds?|fixtures|mocks?)\/|(^|\/)(seed|fixtures?)\.[jt]sx?$/.test(p)) return "data";
+  if (/(^|\/)(components?|ui|views|widgets)\//.test(p) || (/^app\//.test(p) && /\.[jt]sx$/.test(p))) return "components";
+  if (/\.[jt]sx$/.test(p) && !/(^|\/)(lib|utils?|hooks|services|store)\//.test(p)) return "components";
+  return "logic";
 }
+
+/** Layers where the whole file is one building (not split into functions). */
+const FILE_LAYERS = new Set(["components", "pages", "api", "quality"]);
 
 function lineOf(sf, pos) {
   return sf.getLineAndCharacterOfPosition(pos).line + 1;
@@ -101,18 +160,32 @@ function addRange(sf, node, id) {
 }
 
 function routeOf(r) {
-  // app/products/[id]/page.tsx -> /products/[id]
-  if (r === "app/layout.tsx") return "layout";
-  const dir = path.posix.dirname(r).replace(/^app/, "");
-  return dir === "" ? "/" : dir;
+  const p = stripSrc(r);
+  // App router: app/products/[id]/page.tsx -> /products/[id]; app/layout.tsx -> layout
+  if (p.startsWith("app/")) {
+    if (/^app\/layout\.[jt]sx?$/.test(p)) return "layout";
+    const dir = path.posix.dirname(p).replace(/^app/, "").replace(/\/\([^)]*\)/g, "");
+    const route = dir === "" ? "/" : dir;
+    return /\/layout\.[jt]sx?$/.test(p) ? `${route} (layout)` : route;
+  }
+  // Pages router: pages/about.tsx -> /about; pages/index.tsx -> /; pages/_app.tsx -> layout
+  if (/^pages\/_(app|document)\./.test(p)) return "layout";
+  const route = "/" + p.replace(/^pages\//, "").replace(/\.[jt]sx?$/, "").replace(/(^|\/)index$/, "");
+  return route.replace(/\/$/, "") || "/";
+}
+
+function fileAssetId(r, layer) {
+  if (layer === "components") return `comp:${r}`;
+  if (layer === "pages") return `page:${routeOf(r)}`;
+  if (layer === "api") return `api:${r}`;
+  return `test:${r}`;
 }
 
 /** The asset or field that owns a position in a file. */
 function ownerAt(fileName, pos) {
   const r = rel(fileName);
   const layer = layerOf(r);
-  if (layer === "components") return `comp:${r}`;
-  if (layer === "pages") return `page:${routeOf(r)}`;
+  if (FILE_LAYERS.has(layer)) return fileAssetId(r, layer);
   const list = ranges.get(r) ?? [];
   // Innermost range wins (a field inside its interface).
   let best = null;
@@ -133,12 +206,11 @@ for (const f of files) {
   const r = rel(f);
   const layer = layerOf(r);
 
-  if (layer === "components") {
-    const name = path.posix.basename(r).replace(/\.tsx?$/, "");
-    addNode({ id: `comp:${r}`, type: "Component", layer, name, file: r, line: 1 });
-  }
+  const base = path.posix.basename(r).replace(/\.[jt]sx?$/, "");
+  if (layer === "components") addNode({ id: `comp:${r}`, type: "Component", layer, name: base, file: r, line: 1 });
+  if (layer === "api") addNode({ id: `api:${r}`, type: "Endpoint", layer, name: stripSrc(r), file: r, line: 1, criticality: "high" });
+  if (layer === "quality") addNode({ id: `test:${r}`, type: "Test", layer, name: path.posix.basename(r), file: r, line: 1 });
   if (layer === "pages") {
-    if (!/\/(page|layout)\.tsx$/.test(r)) continue;
     const route = routeOf(r);
     addNode({ id: `page:${route}`, type: "Page", layer, name: route === "layout" ? "Root layout" : route, file: r, line: 1 });
   }
@@ -158,6 +230,17 @@ for (const f of files) {
         if (m.type && ts.isTypeReferenceNode(m.type) && ts.isIdentifier(m.type.typeName)) {
           declared.push({ id: fid, sf, typeRef: m.type.typeName.text, kind: "typed" });
         }
+      }
+    } else if (ts.isClassDeclaration(stmt) && stmt.name && !FILE_LAYERS.has(layer)) {
+      const id = `type:${stmt.name.text}`;
+      addNode({ id, type: "TSType", layer, name: stmt.name.text, file: r, line: lineOf(sf, stmt.getStart(sf)), criticality: layer === "types" ? "high" : "medium" });
+      addRange(sf, stmt, id);
+      for (const m of stmt.members) {
+        if (!ts.isPropertyDeclaration(m) || !m.name || !ts.isIdentifier(m.name)) continue;
+        const fid = `field:${stmt.name.text}.${m.name.text}`;
+        addNode({ id: fid, type: "TSField", layer, name: `${stmt.name.text}.${m.name.text}`, file: r, line: lineOf(sf, m.getStart(sf)), parent: id });
+        addRange(sf, m, fid);
+        declared.push({ id: fid, sf, nameNode: m.name, kind: "field" });
       }
     } else if (ts.isTypeAliasDeclaration(stmt)) {
       const id = `type:${stmt.name.text}`;
@@ -180,12 +263,17 @@ for (const f of files) {
   }
 
   // Exported components: link their names so usages point back to the file.
-  if (layer === "components") {
+  if (FILE_LAYERS.has(layer) && layer !== "quality") {
+    const owner = fileAssetId(r, layer);
     for (const stmt of sf.statements) {
-      if (ts.isFunctionDeclaration(stmt) && stmt.name) declared.push({ id: `comp:${r}`, sf, nameNode: stmt.name, kind: "symbol" });
+      if ((ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt)) && stmt.name) declared.push({ id: owner, sf, nameNode: stmt.name, kind: "symbol" });
+      if (ts.isVariableStatement(stmt) && stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) {
+        for (const d of stmt.declarationList.declarations) if (ts.isIdentifier(d.name)) declared.push({ id: owner, sf, nameNode: d.name, kind: "symbol" });
+      }
     }
   }
 }
+progress("parse", `Read ${nodes.size} declarations`, { nodes: nodes.size });
 
 // ---------------------------------------------------------------------------
 // Pass 2: references -> edges.
@@ -229,7 +317,9 @@ function returnedInterfaces(decl) {
   return [...names];
 }
 
+let refDone = 0;
 for (const d of declared) {
+  if (++refDone % 100 === 0) progress("references", `Linked ${refDone} of ${declared.length} declarations`, { done: refDone, total: declared.length });
   if (d.kind === "typed") {
     if (nodes.has(`type:${d.typeRef}`)) addEdge(`type:${d.typeRef}`, d.id, "TYPED_AS", "update_type", `${rel(d.sf.fileName)}:${nodes.get(d.id).line}`);
     continue;
@@ -261,6 +351,8 @@ for (const d of declared) {
   }
 }
 
+progress("references", `Found ${edges.size} links`, { edges: edges.size });
+
 // String keys typed as `keyof SomeInterface` (e.g. key: "totalMau").
 // Find-references does not return these, but they break just the same.
 const propNames = new Map(); // "a|b|c" -> interface name
@@ -291,16 +383,7 @@ for (const f of files) {
 // ---------------------------------------------------------------------------
 // Pass 3: docs and business use (from markdown).
 // ---------------------------------------------------------------------------
-function walk(dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === "node_modules" || e.name === ".git" || e.name === ".next") continue;
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, out);
-    else out.push(p);
-  }
-  return out;
-}
-const allFiles = walk(root);
+progress("docs", "Reading docs");
 const docFiles = allFiles.filter((f) => f.endsWith(".md") && !["AGENTS.md", "CLAUDE.md"].includes(path.basename(f)));
 const fields = [...nodes.values()].filter((n) => n.type === "TSField");
 
@@ -338,7 +421,7 @@ if (readme) {
 // ---------------------------------------------------------------------------
 // Grep index: which files contain each field name as plain text.
 // ---------------------------------------------------------------------------
-const textFiles = allFiles.filter((f) => /\.(tsx?|mdx?|json|ya?ml|css)$/.test(f) && !f.endsWith("package-lock.json"));
+const textFiles = allFiles.filter((f) => /\.(tsx?|jsx?|mjs|cjs|mdx?|json|ya?ml|css)$/.test(f) && !/(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(f) && fs.statSync(f).size < 1_000_000);
 const texts = textFiles.map((f) => [rel(f), fs.readFileSync(f, "utf8")]);
 const textIndex = {};
 for (const word of new Set(fields.map((n) => n.name.split(".")[1]))) {
@@ -350,10 +433,12 @@ for (const word of new Set(fields.map((n) => n.name.split(".")[1]))) {
 // Pass 5: files for the 3D city (one building per file).
 // Lines of code, language, top-level folder, and resolved local imports.
 // ---------------------------------------------------------------------------
+progress("imports", "Mapping files and imports for the 3D city");
 const LANGUAGE = { ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript", md: "markdown", mdx: "markdown", json: "json", css: "css", yml: "yaml", yaml: "yaml" };
 const cityFiles = allFiles
   .map((f) => ({ f, r: rel(f), ext: path.extname(f).slice(1).toLowerCase() }))
-  .filter(({ r, ext }) => LANGUAGE[ext] && !r.split("/").some((p) => p.startsWith(".")) && !/(^|\/)package-lock\.json$/.test(r) && r !== "next-env.d.ts" && !r.startsWith("public/"))
+  .filter(({ f, r, ext }) => LANGUAGE[ext] && !r.split("/").some((p) => p.startsWith(".")) && !/(^|\/)(package-lock\.json|pnpm-lock\.yaml)$/.test(r) && r !== "next-env.d.ts" && !r.startsWith("public/") && fs.statSync(f).size < 1_000_000)
+  .slice(0, maxFiles * 2)
   .map(({ f, r, ext }) => {
     const text = fs.readFileSync(f, "utf8");
     const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "").length;
@@ -374,18 +459,28 @@ for (const x of cityFiles) x.imports = x.imports.filter((p) => knownPaths.has(p)
 // ---------------------------------------------------------------------------
 // Output.
 // ---------------------------------------------------------------------------
+// Only the layers this repo actually uses, in data-flow order.
+const LAYER_DEFS = [
+  { id: "types", label: "Types", requiresApproval: true, check: "tsc passed" },
+  { id: "data", label: "Data", check: "tsc passed; data matches the type" },
+  { id: "logic", label: "Logic", check: "tsc passed" },
+  { id: "api", label: "API", check: "tsc passed; route tests pass" },
+  { id: "components", label: "Components", check: "tsc and eslint passed" },
+  { id: "pages", label: "Pages", check: "build passed" },
+  { id: "business", label: "Business use", check: "Read-only" },
+];
+const usedLayers = new Set([...nodes.values()].map((n) => n.layer));
+let column = 0;
+const layers = [
+  ...LAYER_DEFS.filter((l) => usedLayers.has(l.id)).map((l) => ({ ...l, column: column++ })),
+  { id: "quality", label: "Tests and docs", column: -1, check: "Tests pass; doc links resolve" },
+];
+
+progress("write", "Saving the graph");
 const graph = {
   repo: repoName,
   scannedAt: new Date().toISOString(),
-  layers: [
-    { id: "types", label: "Types", column: 0, requiresApproval: true, check: "tsc passed" },
-    { id: "data", label: "Seed data", column: 1, check: "tsc passed; seed rows match the type" },
-    { id: "logic", label: "Data layer", column: 2, check: "tsc passed" },
-    { id: "components", label: "Components", column: 3, check: "tsc and eslint passed" },
-    { id: "pages", label: "Pages", column: 4, check: "next build passed" },
-    { id: "business", label: "Business use", column: 5, check: "Read-only" },
-    { id: "quality", label: "Docs", column: -1, check: "Doc links resolve" },
-  ],
+  layers,
   nodes: [...nodes.values()],
   edges: [...edges.values()],
   textIndex,
@@ -396,7 +491,20 @@ fs.mkdirSync(path.dirname(path.resolve(outArg)), { recursive: true });
 fs.writeFileSync(outArg, JSON.stringify(graph, null, 2) + "\n");
 
 const count = (t) => graph.nodes.filter((n) => n.type === t).length;
-console.log(
+progress("done", "Knowledge graph ready", {
+  stats: {
+    codeFiles: files.length,
+    files: cityFiles.length,
+    lines: cityFiles.reduce((n, x) => n + x.lines, 0),
+    nodes: graph.nodes.length,
+    edges: graph.edges.length,
+    imports: cityFiles.reduce((n, x) => n + x.imports.length, 0),
+    layers: layers.length,
+    truncated,
+    ms: Date.now() - started,
+  },
+});
+if (!showProgress) console.log(
   `Scanned ${files.length} files in ${repoName}: ${graph.nodes.length} nodes ` +
     `(${count("TSType")} types, ${count("TSField")} fields, ${count("Function")} functions, ` +
     `${count("Component")} components, ${count("Page")} pages, ${count("Doc")} docs, ` +
