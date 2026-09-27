@@ -156,3 +156,6 @@ systemdna/samples/marketplace-dashboard/
 *.swo
 .DS_Store
 Thumbs.db
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl.bak
