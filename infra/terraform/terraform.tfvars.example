@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is git-ignored.
+region = "ap-south-1"
+
+# HTTPS with a custom domain (DNS outside Route 53): see "HTTPS" in infra/README.md.
+# domain_name           = "systemdna.example.com"
+# certificate_validated = false   # true after the validation CNAME is live
+
+# Lock the demo down to your office / VPN.
+# allowed_cidrs = ["203.0.113.0/24"]
+
+# budget_email     = "cloud-team@example.com"
+# budget_limit_usd = 100
