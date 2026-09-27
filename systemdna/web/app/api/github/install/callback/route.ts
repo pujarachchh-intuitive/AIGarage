@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const action = request.nextUrl.searchParams.get("setup_action") ?? "install";
-  const back = new URL("/repos", request.nextUrl.origin);
-  back.searchParams.set("github", action === "update" ? "updated" : "installed");
-  return Response.redirect(back, 303);
+  // Relative on purpose: behind a load balancer nextUrl.origin is the container's own
+  // address (http://localhost:3000), not the domain the browser used.
+  const back = `/repos?github=${action === "update" ? "updated" : "installed"}`;
+  return new Response(null, { status: 303, headers: { Location: back } });
 }
